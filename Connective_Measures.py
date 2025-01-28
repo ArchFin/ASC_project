@@ -1,87 +1,141 @@
 import numpy as np
-from scipy.signal import hilbert
+from scipy.signal import butter, filtfilt, hilbert
+from itertools import combinations
 
-def compute_wsmi(signal1, signal2, num_bins=4, delay=1):
+def bandpass_filter(data, low, high, fs):
     """
-    Compute Weighted Symbolic Mutual Information (wSMI) between two signals.
+    Apply a bandpass filter to EEG data.
     Args:
-        signal1 (numpy array): First EEG signal.
-        signal2 (numpy array): Second EEG signal.
-        num_bins (int): Number of bins for symbolic encoding.
-        delay (int): Delay parameter for embedding.
+        data (numpy array): EEG signal.
+        low (float): Low cutoff frequency.
+        high (float): High cutoff frequency.
+        fs (float): Sampling frequency.
+    Returns:
+        numpy array: Filtered signal.
+    """
+    nyquist = 0.5 * fs
+    low /= nyquist
+    high /= nyquist
+    b, a = butter(2, [low, high], btype="band")
+    return filtfilt(b, a, data)
+
+def symbolic_transform(data, k, tau):
+    """
+    Transform EEG signal into symbols based on permutation entropy.
+    Args:
+        data (numpy array): EEG signal.
+        k (int): Length of the symbol (number of points per symbol).
+        tau (int): Temporal separation between points in the symbol.
+    Returns:
+        numpy array: Symbolic representation of the signal.
+    """
+    n = len(data)
+    symbols = []
+    for i in range(n - (k - 1) * tau):
+        subsequence = data[i:i + k * tau:tau]
+        rank = np.argsort(subsequence)
+        symbols.append(tuple(rank))
+    return np.array(symbols)
+
+def compute_weighted_smi(signal1, signal2, k=3, tau=1):
+    """
+    Compute Weighted Symbolic Mutual Information (wSMI) between two EEG signals.
+    Args:
+        signal1, signal2 (numpy arrays): EEG signals.
+        k (int): Length of the symbol (default=3).
+        tau (int): Temporal separation parameter (default=1).
     Returns:
         float: Weighted Symbolic Mutual Information.
     """
-    def symbolic_encoding(signal, num_bins):
-        """Symbolically encode the signal into discrete states."""
-        bins = np.linspace(np.min(signal), np.max(signal), num_bins + 1)
-        encoded = np.digitize(signal, bins) - 1  # Ensure indices start at 0
-        encoded[encoded == num_bins] = num_bins - 1  # Handle edge case
-        return encoded
+    symbols1 = symbolic_transform(signal1, k, tau)
+    symbols2 = symbolic_transform(signal2, k, tau)
+    unique_symbols1, counts1 = np.unique(symbols1, axis=0, return_counts=True)
+    unique_symbols2, counts2 = np.unique(symbols2, axis=0, return_counts=True)
+    joint_symbols, joint_counts = np.unique(
+        np.stack((symbols1, symbols2), axis=1), axis=0, return_counts=True
+    )
 
-    def compute_joint_distribution(encoded1, encoded2):
-        """Compute joint probability distribution of two encoded signals."""
-        joint_hist = np.zeros((num_bins, num_bins))
-        for x, y in zip(encoded1, encoded2):
-            joint_hist[x, y] += 1
-        joint_hist /= np.sum(joint_hist)
-        return joint_hist
-
-    # Symbolic encoding
-    encoded1 = symbolic_encoding(signal1[::delay], num_bins)
-    encoded2 = symbolic_encoding(signal2[::delay], num_bins)
-
-    # Joint and marginal probabilities
-    joint_prob = compute_joint_distribution(encoded1, encoded2)
-    marg_prob1 = np.sum(joint_prob, axis=1)
-    marg_prob2 = np.sum(joint_prob, axis=0)
+    # Compute probabilities
+    p1 = counts1 / np.sum(counts1)
+    p2 = counts2 / np.sum(counts2)
+    p_joint = joint_counts / np.sum(joint_counts)
 
     # Compute wSMI
     wsmi = 0
-    for i in range(num_bins):
-        for j in range(num_bins):
-            if joint_prob[i, j] > 0:
-                wsmi += joint_prob[i, j] * np.log2(
-                    joint_prob[i, j] / (marg_prob1[i] * marg_prob2[j])
-                )
+    for p in p_joint:
+        if p > 0:
+            wsmi += p * np.log2(p / (p1 * p2))
     return wsmi
 
-def compute_wpli(signal1, signal2):
+def compute_wpli(signal1, signal2, fs):
     """
-    Compute Weighted Phase Lag Index (wPLI) between two signals.
+    Compute Weighted Phase Lag Index (wPLI) between two EEG signals.
     Args:
-        signal1 (numpy array): First EEG signal.
-        signal2 (numpy array): Second EEG signal.
+        signal1, signal2 (numpy arrays): EEG signals.
+        fs (float): Sampling frequency.
     Returns:
         float: Weighted Phase Lag Index.
     """
-    # Compute the analytic signals using the Hilbert transform
+    # Hilbert transform to get analytic signal
     analytic_signal1 = hilbert(signal1)
     analytic_signal2 = hilbert(signal2)
 
-    # Compute the instantaneous phase difference
+    # Compute phase differences
     phase_diff = np.angle(analytic_signal1) - np.angle(analytic_signal2)
 
-    # Compute the imaginary component of the phase difference
+    # Compute imaginary part of phase differences
     imag_phase_diff = np.imag(np.exp(1j * phase_diff))
 
     # Compute wPLI
-    numerator = np.sum(np.abs(imag_phase_diff) * np.sign(imag_phase_diff))
-    denominator = np.sum(np.abs(imag_phase_diff))
-    wpli = np.abs(numerator / denominator) if denominator != 0 else 0
+    num = np.abs(np.mean(imag_phase_diff))
+    den = np.mean(np.abs(imag_phase_diff))
+    wpli = num / den if den != 0 else 0
     return wpli
 
+def compute_connectivity_measures(eeg_data, fs, frequency_bands, k=3, tau=1):
+    """
+    Compute wSMI and wPLI for all electrode pairs across all frequency bands.
+    Args:
+        eeg_data (numpy array): EEG data (channels x time).
+        fs (float): Sampling frequency.
+        frequency_bands (list of tuples): List of (low, high) cutoff frequencies.
+        k (int): Length of the symbol for wSMI (default=3).
+        tau (int): Temporal separation parameter for wSMI (default=1).
+    Returns:
+        dict: Connectivity measures (wSMI and wPLI) for each frequency band.
+    """
+    num_channels = eeg_data.shape[0]
+    results = {band: {"wSMI": [], "wPLI": []} for band in frequency_bands}
 
-# Example Usage
-if __name__ == "__main__":
-    # Simulated EEG signals (replace with actual EEG data)
-    eeg_signal1 = np.random.normal(0, 1, 1000)
-    eeg_signal2 = np.random.normal(0, 1, 1000)
+    for band in frequency_bands:
+        low, high = band
+        filtered_data = np.array([bandpass_filter(eeg_data[i], low, high, fs) for i in range(num_channels)])
 
-    # Compute wSMI
-    wsmi_value = compute_wsmi(eeg_signal1, eeg_signal2, num_bins=4, delay=1)
-    print(f"Weighted Symbolic Mutual Information (wSMI): {wsmi_value:.4f}")
+        for i, j in combinations(range(num_channels), 2):
+            signal1, signal2 = filtered_data[i], filtered_data[j]
 
-    # Compute wPLI
-    wpli_value = compute_wpli(eeg_signal1, eeg_signal2)
-    print(f"Weighted Phase Lag Index (wPLI): {wpli_value:.4f}")
+            # Compute wSMI
+            wsmi_value = compute_weighted_smi(signal1, signal2, k, tau)
+
+            # Compute wPLI
+            wpli_value = compute_wpli(signal1, signal2, fs)
+
+            # Store results
+            results[band]["wSMI"].append(wsmi_value)
+            results[band]["wPLI"].append(wpli_value)
+
+    return results
+
+# Example EEG data (channels x time)
+eeg_data = np.random.rand(64, 1250)  # 64 channels, 5 seconds at 250 Hz
+fs = 250  # Sampling frequency
+frequency_bands = [(0.5, 4), (4, 8), (8, 12), (12, 30)]  # Delta, Theta, Alpha, Beta
+
+# Compute connectivity measures
+results = compute_connectivity_measures(eeg_data, fs, frequency_bands)
+
+# Example output
+for band in frequency_bands:
+    print(f"Frequency Band: {band}")
+    print("wSMI:", results[band]["wSMI"])
+    print("wPLI:", results[band]["wPLI"])
