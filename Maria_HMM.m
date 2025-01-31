@@ -27,21 +27,26 @@ participantFolders2 = {
 '8725_SishouMosquito',
 '8725_YangchunCobra'
 };
+
 % Load data from both groups
 [allTETData1, participantIDs1, groups1, meditationStyles1, sessionIDs1] = loadTETData(mainFolder1, participantFolders1, 'Group1');
 [allTETData2, participantIDs2, groups2, meditationStyles2, sessionIDs2] = loadTETData(mainFolder2, participantFolders2, 'Group2');
+
 % ensure both datasets have the same number of columns
 if size(allTETData1, 2) == size(allTETData2, 2)
+
 %concatenate data from both groups
 allTETData = [allTETData1; allTETData2];
 participantIDs = [participantIDs1; participantIDs2];
 groups = [groups1; groups2];
 meditationStyles = [meditationStyles1; meditationStyles2];
 sessionIDs = [sessionIDs1; sessionIDs2];
+
 %normalize the data
 allTETData = zscore(allTETData);
 %set the random seed for reproducibility
 rng(12345); % Ensuring the same clusters are used every time
+
 % set the number of clusters
 optimal_k = 4;
 % Apply K-Means clustering
@@ -58,6 +63,7 @@ saveFolder = '/Users/mariakarampela/Downloads/repetitions';
 if ~exist(saveFolder, 'dir')
 mkdir(saveFolder);
 end
+
 %Repeat the HMM process
 for rep = 1:numRepetitions
 fprintf('Repetition %d of %d\n', rep, numRepetitions);
