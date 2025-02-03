@@ -325,8 +325,6 @@ class KMeansVectorClustering:
         return self.differences_array
 
 
-
-    
 class KMeansVectorVisualizer:
     def __init__(self, filelocation_TET, savelocation_TET, differences_array, df_csv_file_original, dictionary_clust_labels, principal_components, feelings, no_of_jumps):
         # Initialize class variables with provided parameters

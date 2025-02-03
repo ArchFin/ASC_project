@@ -144,7 +144,6 @@ class principal_component_finder:
         
         return df_TET_feelings_prin_dict
 
-
 class HMMClustering:
     def __init__(self, filelocation_TET, savelocation_TET, df_csv_file_original, feelings, feelings_diffs, principal_components, no_of_jumps, colours, colours_list, ):
         self.filelocation_TET = filelocation_TET
@@ -311,7 +310,6 @@ class HMMClustering:
         self.plot_cluster_counts()
         return self.array, self.dictionary_clust_labels
 
-    
 class Visualizer:
     def __init__(self, filelocation_TET, savelocation_TET, array, df_csv_file_original, dictionary_clust_labels, principal_components, feelings, no_of_jumps):
         self.filelocation_TET = filelocation_TET
