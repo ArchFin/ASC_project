@@ -51,6 +51,20 @@ colours:
   3: orange
   4: pink
   5: yellow
+  6: cyan
+  7: magenta
+  8: black
+  9: white
+  10: purple
+  11: brown
+  12: grey
+  13: lime
+  14: navy
+  15: gold
+  16: skyblue
+  17: darkred
+  18: turquoise
+  19: olive
 
 colours_list:
   - red
@@ -59,5 +73,19 @@ colours_list:
   - orange
   - pink
   - yellow
+  - cyan
+  - magenta
+  - black
+  - white
+  - purple
+  - brown
+  - grey
+  - lime
+  - navy
+  - gold
+  - skyblue
+  - darkred
+  - turquoise
+  - olive
 
 header: 'Week'

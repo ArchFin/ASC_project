@@ -14,7 +14,7 @@ import matplotlib.patches as mpatches
 from statsmodels.tsa.stattools import acf
 import yaml
 from scipy.spatial.distance import euclidean
-
+from hmmlearn import hmm
 
 # Load YAML file
 with open("Breathwork.yaml", "r") as file:
@@ -144,31 +144,9 @@ class principal_component_finder:
         
         return df_TET_feelings_prin_dict
 
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-from sklearn.cluster import KMeans
 
-class KMeansVectorClustering:
-    """
-    A class to perform K-Means clustering on vectorized TET data.
-    """
-
-    def __init__(self, filelocation_TET, savelocation_TET, df_csv_file_original, feelings, feelings_diffs, principal_components, no_of_jumps, colours, colours_list):
-        """
-        Initialise the KMeansVectorClustering class with data and parameters.
-
-        Args:
-            filelocation_TET (str): File path for TET data.
-            savelocation_TET (str): Save location for output files.
-            df_csv_file_original (DataFrame): Original input dataset.
-            feelings (list): List of emotional states to analyse.
-            feelings_diffs (list): Differences of emotional states.
-            principal_components (array): Principal component transformation matrix.
-            no_of_jumps (int): Step size for downsampling.
-            colours (dict): Colour mapping for clusters.
-            colours_list (list): List of colour values.
-        """
+class HMMClustering:
+    def __init__(self, filelocation_TET, savelocation_TET, df_csv_file_original, feelings, feelings_diffs, principal_components, no_of_jumps, colours, colours_list, ):
         self.filelocation_TET = filelocation_TET
         self.savelocation_TET = savelocation_TET
         self.df_csv_file_original = df_csv_file_original
@@ -178,303 +156,269 @@ class KMeansVectorClustering:
         self.no_of_jumps = no_of_jumps
         self.colours = colours
         self.colours_list = colours_list
+        #self.n_components = n_components  # Number of hidden states
 
     def preprocess_data(self):
-        """
-        Preprocess the data by downsampling and computing emotional state differences.
-        """
         split_dict_skip = {}
-
-        # Group by subject, week, and session, then downsample
         for (subject, week, session), group in self.df_csv_file_original.groupby(['Subject', 'Week', 'Session']):
             group = group.iloc[::self.no_of_jumps].copy()
-
-            # Compute the difference in emotional states
-            for feeling in self.feelings:
-                group[f'{feeling}_diff'] = -group[feeling].diff(-1)
-
+            # for feeling in self.feelings:
+            #     group[f'{feeling}_diff'] = -group[feeling].diff(-1)
             split_dict_skip[(subject, week, session)] = group
 
-        # Combine processed data
-        self.df_csv_file = pd.concat(split_dict_skip.values())
+        self.df_csv_file = pd.concat([df for df in split_dict_skip.values()])
+        split_dict = {}
+        for (subject, week, session), group in self.df_csv_file.groupby(['Subject', 'Week', 'Session']):
+            split_dict[(subject, week, session)] = group.copy()
+        self.array = pd.concat([df[:-1] for df in split_dict.values()])
+        self.array_MI = self.array.copy()
+        self.array_MI['number'] = range(self.array.shape[0])
 
-        # Store grouped data for later clustering
-        split_dict = {key: group.copy() for key, group in self.df_csv_file.groupby(['Subject', 'Week', 'Session'])}
-        self.differences_array = pd.concat([df[:-1] for df in split_dict.values()])
-        self.differences_array_MI = self.differences_array.copy()
-        self.differences_array_MI['number'] = range(self.differences_array.shape[0])
+    def perform_clustering(self, min_states = 2, max_states =20):
+        best_score = float("inf")
+        best_model = None
+        for n in range(min_states, max_states + 1):
+            model = hmm.GaussianHMM(n_components=n, covariance_type="diag", n_iter=3000)
+            model.fit(self.array.iloc[:, 4:4+len(self.feelings)])
+            score = model.bic(self.array.iloc[:, 4:4+len(self.feelings)])  
+            if score < best_score:
+                best_score = score
+                best_model = model
+                best_n = n
+        
+        # Fit the model to the data
+        best_model.fit(self.array.iloc[:, 4:4+len(self.feelings)])  
+        
+        # Predict the hidden states (cluster labels)
+        self.array_MI['labels unnormalised vectors'] = best_model.predict(self.array.iloc[:, 4:4+len(self.feelings)])  
 
-    def perform_clustering(self):
-        """
-        Perform K-Means clustering on the processed data.
-        """
-        wcss_best = float('inf')  # Track the best Within-Cluster Sum of Squares (WCSS)
-        self.labels_fin = []
-        self.cluster_centres_fin = []
+        # Save results
+        self.labels_fin = self.array_MI['labels unnormalised vectors']
+        self.cluster_centres_fin = model.means_  # HMM means represent the centers of the hidden states
 
-        # Run K-Means 1000 times to find the best clustering
-        for _ in range(1000):
-            kmeans = KMeans(3)
-            kmeans.fit(self.differences_array.iloc[:, -len(self.feelings)::])
-
-            # Update best clustering if WCSS improves
-            if kmeans.inertia_ < wcss_best:
-                wcss_best = kmeans.inertia_
-                self.labels_fin = kmeans.labels_
-                self.cluster_centres_fin = kmeans.cluster_centers_
-
-        # Store cluster labels in the dataset
-        self.differences_array_MI['labels unnormalised vectors'] = self.labels_fin
-        self.point_colours = [self.colours[i] for i in self.labels_fin]
 
     def plot_results(self):
-        """
-        Generate a scatter plot of clustered data using principal components.
-        """
-        # Project data onto principal components
-        self.differences_array[["principal component 1", "principal component 2"]] = self.differences_array.iloc[:, -len(self.feelings):].dot(self.principal_components)
-
-        # Scatter plot of clustered points
-        plt.scatter(self.differences_array["principal component 1"], self.differences_array["principal component 2"], color=self.point_colours, s=0.5)
-        plt.xlabel("Principal Component 1 (Bored/Effort)")
-        plt.ylabel("Principal Component 2 (Calm)")
-        plt.title("K-Means Cluster Scatter Plot")
+        self.array[["principal componant 1", "principal componant 2"]] = self.array.iloc[:, 4:4+len(self.feelings)].dot(self.principal_components)
+        plt.scatter(self.array["principal componant 1"], self.array["principal componant 2"], color=[self.colours[i] for i in self.labels_fin], s=0.5)
+        plt.xlabel("principal componant 1 (bored/effort)")
+        plt.ylabel("principal componant 2 (calm)")
+        plt.title("scatter plot of HMM state assignments for TET data vectors")
         plt.tight_layout()
-        plt.savefig(self.savelocation_TET + 'K_means_vector_scatter_plot')
+        plt.savefig(self.savelocation_TET + f'HMM_state_scatter_plot')
         plt.show()
 
-        # Plot cluster centres as vectors
         cluster_centres_prin = np.transpose(self.cluster_centres_fin.dot(self.principal_components), (1, 0))
         for i in range(cluster_centres_prin.shape[1]):
             plt.arrow(0, 0, cluster_centres_prin[0, i], cluster_centres_prin[1, i], head_width=0.1, head_length=0.1, fc=self.colours_list[i], ec=self.colours_list[i])
-        
-        plt.xlabel("Principal Component 1 (Bored*Effort)")
-        plt.ylabel("Principal Component 2 (Calm)")
-        plt.legend([f'Cluster {i+1}' for i in range(cluster_centres_prin.shape[1])])
-        plt.title("Cluster Centres for K-Means Vector")
+        plt.xlabel("principal component 1 (bored*effort)")
+        plt.ylabel("principal component 2 (calm)")
+        plt.legend(['State {}'.format(i+1) for i in range(cluster_centres_prin.shape[1])])
+        plt.title("State centers for HMM")
         plt.xlim(-1.2, 1.2)
         plt.ylim(-1.2, 1.2)
         plt.tight_layout()
-        plt.savefig(self.savelocation_TET + 'cluster_centres_for_kmeans_vectors')
+        plt.savefig(self.savelocation_TET + f'state_centers_for_HMM')
         plt.show()
 
     def plot_cluster_centroids(self):
-        """
-        Plot bar charts of cluster centroids to visualise key features.
-        """
         for i in range(self.cluster_centres_fin.shape[0]):
             plt.figure()
             plt.bar(self.feelings, self.cluster_centres_fin[i])
             plt.ylim(-0.22, 0.22)
             plt.xticks(rotation=45, ha='right')
-            plt.title(f"Cluster Centroid for Cluster {i+1}")
+            plt.title(f"state centroid for state {i+1}")
             plt.tight_layout()
-            plt.savefig(self.savelocation_TET + f'K-Vector_Vector_Cluster_Centroids_{i}')
+            plt.savefig(self.savelocation_TET + f'HMM_State_Centroids_{i}')
             plt.show()
 
     def stable_cluster_analysis(self):
-        """
-        Perform secondary clustering analysis on the most stable cluster.
-        """
         magnitudes = [np.linalg.norm(centre) for centre in self.cluster_centres_fin]
-        stable_cluster = np.argmin(magnitudes)  # Identify the most stable cluster
+        stable_cluster = np.argmin(magnitudes)
+        self.array['clust'] = self.labels_fin
+        df_stable = self.array[self.array['clust'] == stable_cluster].copy()
 
-        # Extract stable cluster data
-        df_stable = self.differences_array[self.differences_array['clust'] == stable_cluster].copy()
+        model = hmm.GaussianHMM(n_components=2, covariance_type="diag", n_iter=1000)
+        
+        # Fit the model to the stable cluster data
+        model.fit(df_stable[self.feelings])
+        
+        # Predict the hidden states (cluster labels)
+        labels_fin_stable = model.predict(df_stable[self.feelings])  
+        cluster_centres_fin_stable = model.means_
 
-        wcss_best = float('inf')
-        labels_fin_stable = []
-        cluster_centres_fin_stable = []
-
-        # Perform K-Means within the stable cluster
-        for _ in range(1000):
-            kmeans = KMeans(2)
-            kmeans.fit(df_stable[self.feelings])
-
-            if kmeans.inertia_ < wcss_best:
-                wcss_best = kmeans.inertia_
-                labels_fin_stable = kmeans.labels_
-                cluster_centres_fin_stable = kmeans.cluster_centers_
-
-        # Assign new labels for stable clusters
+        # Update the cluster labels
+        df_stable = df_stable.drop('clust', axis=1)
         df_stable['clust_name'] = [f'{stable_cluster+1}a' if label == 0 else f'{stable_cluster+1}b' for label in labels_fin_stable]
         df_stable['clust'] = [stable_cluster if label == 0 else 3 for label in labels_fin_stable]
-        self.differences_array.update(df_stable)
+        self.array['clust_name'] = self.array['clust'] + 1
+        self.array.update(df_stable)
 
-        # Plot stable cluster centroids
+        # Create a dictionary for cluster labels
+        clust_labels = self.array['clust'].unique() + 1
+        clust_name_labels = self.array['clust_name'].unique()
+        self.dictionary_clust_labels = {clust: clust_name for clust, clust_name in zip(clust_labels, clust_name_labels)}
+
         alphabet = {0: 'a', 1: 'b'}
+        # Plot the centroids for stable states
         for i in range(cluster_centres_fin_stable.shape[0]):
             plt.figure()
             plt.bar(self.feelings, cluster_centres_fin_stable[i])
             plt.xticks(rotation=45, ha='right')
             plt.ylim(0, 1)
-            plt.title(f"Cluster Centroid for Stable Cluster {stable_cluster+1}{alphabet[i]}")
+            plt.title(f"state centroid for state {stable_cluster+1}{alphabet[i]} HMM on stable points")
             plt.tight_layout()
-            plt.savefig(self.savelocation_TET + f'K-Vector_Cluster_Centroids_for_stable_cluster_{i}')
+            plt.savefig(self.savelocation_TET + f'HMM_state_Centroids_for_stable_state_{i}')
             plt.show()
 
+        # Plot the stable state centroids on principal components
+        cluster_centres_prin_stable = np.transpose(cluster_centres_fin_stable.dot(self.principal_components), (1, 0))
+        plt.figure()
+        for i in range(cluster_centres_prin_stable.shape[1]):
+            state_label = f'State {stable_cluster + 1}{alphabet[i]}'
+            plt.scatter(cluster_centres_prin_stable[0, i], cluster_centres_prin_stable[1, i], label=state_label)
+        plt.xlabel("Principal Component 1 (Bored*Effort)")
+        plt.ylabel("Principal Component 2 (Calm)")
+        plt.xlim(-2, 2)
+        plt.ylim(-1, 1)
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(self.savelocation_TET + f'HMM_stable_state_centroids')
+        plt.show()
+
+    def plot_cluster_counts(self):
+        self.array['clust_name'] = self.array['clust_name'].astype(str)
+        unique, counts = np.unique(self.array['clust_name'], return_counts=True)
+        label_counts = dict(zip(unique, counts))
+        labels = list(label_counts.keys())
+        counts = list(label_counts.values())
+
+        plt.figure(figsize=(10, 5))
+        plt.bar(labels, counts)
+        plt.xticks(ticks=np.arange(len(labels)), labels=labels, rotation='vertical')
+        plt.xlabel('State Labels')
+        plt.ylabel('Counts')
+        plt.title('Distribution of State Labels')
+        plt.tight_layout()
+        plt.savefig(self.savelocation_TET + f'HMM_state_counts')
+        plt.show()
+
     def run(self):
-        """
-        Execute all steps: preprocessing, clustering, plotting, and analysis.
-        """
         self.preprocess_data()
         self.perform_clustering()
         self.plot_results()
         self.plot_cluster_centroids()
         self.stable_cluster_analysis()
-        return self.differences_array
-
-
+        self.plot_cluster_counts()
+        return self.array, self.dictionary_clust_labels
 
     
-class KMeansVectorVisualizer:
-    def __init__(self, filelocation_TET, savelocation_TET, differences_array, df_csv_file_original, dictionary_clust_labels, principal_components, feelings, no_of_jumps):
-        # Initialize class variables with provided parameters
+class Visualizer:
+    def __init__(self, filelocation_TET, savelocation_TET, array, df_csv_file_original, dictionary_clust_labels, principal_components, feelings, no_of_jumps):
         self.filelocation_TET = filelocation_TET
         self.savelocation_TET = savelocation_TET
-        self.differences_array = differences_array
+        self.array = array
         self.df_csv_file_original = df_csv_file_original
         self.dictionary_clust_labels = dictionary_clust_labels
         self.principal_components = principal_components
         self.feelings = feelings
         self.no_of_jumps = no_of_jumps
-        
-        # Define a color map for different clusters
         self.color_map = {
             0: 'red',
             1: 'green',
             2: 'blue',
             3: 'yellow',
+            4: 'pink',
         }
 
     def preprocess_data(self):
-        # Compute principal component projections for the differences array
-        self.differences_array[["principal component 1 non-diff", "principal component 2 non-diff"]] = self.differences_array[self.feelings].dot(self.principal_components)
-        
-        # Initialize dictionaries to store trajectory data
+        self.array[["principal componant 1 non-diff", "principal componant 2 non-diff"]] = self.array[self.feelings].dot(self.principal_components)
         self.traj_transitions_dict = {}
         self.traj_transitions_dict_original = {}
-        
-        # Group original CSV data by Subject, Week, and Session
         for heading, group in self.df_csv_file_original.groupby(['Subject', 'Week', 'Session']):
             self.traj_transitions_dict_original[heading] = group
-        
-        # Group transformed differences data by Subject, Week, and Session
-        for heading, group in self.differences_array.groupby(['Subject', 'Week', 'Session']):
+        for heading, group in self.array.groupby(['Subject', 'Week', 'Session']):
             self.traj_transitions_dict[heading] = group
 
     def plot_trajectories(self):
-        # Iterate over each trajectory group in the original dataset
         for heading, value in self.traj_transitions_dict_original.items():
-            plt.figure()  # Create a new figure
-            
-            # Define time array for plotting
-            starting_time = 0
-            time_jump = 28
-            time_array = np.arange(starting_time, starting_time + time_jump * value.shape[0], time_jump)
-            
-            # Plot each feeling rating over time
+            plt.figure()
             for feeling in self.feelings:
+                starting_time = 0
+                time_jump = 28
+                time_array = np.arange(starting_time, starting_time + time_jump * value.shape[0], time_jump)
                 plt.plot(time_array, value[feeling] * 10, label=feeling)
-            
-            # Generate a cleaned title string from the heading tuple
             combined = ''.join(map(str, heading))
             cleaned = combined.replace("\\", "").replace("'", "").replace(" ", "").replace("(", "").replace(")", "")
-            
             plt.title(f'{cleaned}')
             plt.xlabel('Time')
             plt.ylabel('Rating')
             plt.tight_layout()
-            
-            # Colour background regions based on cluster transitions
+
             prev_color_val = self.traj_transitions_dict[heading]['clust'].iloc[0]
             start_index = 0
             for index, color_val in enumerate(self.traj_transitions_dict[heading]['clust']):
                 if color_val != prev_color_val or index == self.traj_transitions_dict[heading].shape[0] - 1:
-                    # Determine the end index for the coloured region
                     end_index = index * (time_jump * self.no_of_jumps) if index != self.traj_transitions_dict[heading].shape[0] - 1 else time_array[-1]
-                    
-                    # Highlight cluster regions with transparent coloured bands
                     plt.axvspan(start_index * (time_jump * self.no_of_jumps), end_index, facecolor=self.color_map[prev_color_val], alpha=0.3)
-                    
-                    # Update start index and previous cluster value
                     start_index = index
                     prev_color_val = color_val
-            
-            # Create legend patches for cluster colours
+
             cluster_patches = [mpatches.Patch(color=color, label=f'Cluster {cluster}') for cluster, color in self.color_map.items()]
             handles, labels = plt.gca().get_legend_handles_labels()
             handles.extend(cluster_patches)
             labels.extend([f'Cluster {cluster}' for cluster in self.dictionary_clust_labels.values()])
-            
-            # Display legend outside the plot
             plt.legend(handles=handles, labels=labels, title='Legend', bbox_to_anchor=(1.05, 1), loc='upper left')
-            
-            # Save the plot
-            plt.savefig(self.savelocation_TET + f'K_Vector_stable_cluster_centroids')
+
+            plt.savefig(self.savelocation_TET + f'HMM_stable_cluster_centroids')
             plt.show()
-    
+
     def run(self):
-        # Run the preprocessing and visualization methods
         self.preprocess_data()
         self.plot_trajectories()
 
 class JumpAnalysis:
-    # Constructor to initialize the class with necessary variables.
     def __init__(self, filelocation_TET, savelocation_TET, df_csv_file_original, feelings, feelings_diffs):
-        self.filelocation_TET = filelocation_TET  # Path where TET files are stored
-        self.savelocation_TET = savelocation_TET  # Path to save results
-        self.df_csv_file_original = df_csv_file_original  # Original dataframe
-        self.feelings = feelings  # List of feelings columns in the dataframe
-        self.feelings_diffs = feelings_diffs  # List of differences for feelings columns
+        self.filelocation_TET = filelocation_TET
+        self.savelocation_TET = savelocation_TET
+        self.df_csv_file_original = df_csv_file_original
+        self.feelings = feelings
+        self.feelings_diffs = feelings_diffs
 
-    # Method to analyse stability of clusters based on the number of time steps (jumps)
     def determine_no_jumps_stability(self):
-        y_labels = []  # Stores the ratio of the dominant stable cluster
-        x_labels = []  # Stores the corresponding time steps (jumps)
-        
-        # Loop through different values of time steps (from 1 to 29)
+        y_labels = []
+        x_labels = []
         for j in range(1, 30):
-            split_dict_skip = {}  # Dictionary to store grouped data with skips (time steps)
-            
-            # Group data by subject, week, and session
+            split_dict_skip = {}
             for (subject, week, session), group in self.df_csv_file_original.groupby(['Subject', 'Week', 'Session']):
-                group = group.iloc[::j].copy()  # Skip rows by j steps
-                # Calculate the differences for each feeling
+                group = group.iloc[::j].copy()
                 for feeling in self.feelings:
                     group[f'{feeling}_diff'] = -group[feeling].diff(-1)
                 split_dict_skip[(subject, week, session)] = group
 
-            df_csv_file_new = pd.concat([df for df in split_dict_skip.values()])  # Concatenate the split data
-            
-            # Group data again by subject, week, and session
+            df_csv_file_new = pd.concat([df for df in split_dict_skip.values()])
             split_dict = {}
             for (subject, week, session), group in df_csv_file_new.groupby(['Subject', 'Week', 'Session']):
                 split_dict[(subject, week, session)] = group.copy()
-                
-            differences_array = pd.concat([df[:-1] for df in split_dict.values()])  # Concatenate data after skipping last row
-            differences_array_MI = differences_array.copy()
-            differences_array_MI['number'] = range(differences_array.shape[0])  # Add a sequence number column
+            array = pd.concat([df[:-1] for df in split_dict.values()])
+            array_MI = array.copy()
+            array_MI['number'] = range(array.shape[0])
 
-            wcss_best = float('inf')  # Initialise to store the best WCSS (Within-Cluster Sum of Squares)
-            labels_fin = []  # Store final cluster labels
-            cluster_centres_fin = []  # Store final cluster centers
-            
-            # Run k-means clustering 1000 times to get the best clustering
+            wcss_best = float('inf')
+            labels_fin = []
+            cluster_centres_fin = []
             for _ in range(1000):
-                kmeans = KMeans(3)  # Use 3 clusters for k-means
-                kmeans.fit(differences_array.iloc[:, -len(self.feelings):])  # Fit using the last 14 columns (assumed to be features)
-                if kmeans.inertia_ < wcss_best:  # Update if a better (lower) WCSS is found
+                kmeans = KMeans(3)
+                kmeans.fit(array.iloc[:, -14:])
+                if kmeans.inertia_ < wcss_best:
                     wcss_best = kmeans.inertia_
                     labels_fin = kmeans.labels_
                     cluster_centres_fin = kmeans.cluster_centers_
 
-            differences_array_MI['labels unnormalised vectors'] = labels_fin  # Add labels to data
-            unique, counts = np.unique(labels_fin, return_counts=True)  # Get counts of each label
+            array_MI['labels unnormalised vectors'] = labels_fin
+            unique, counts = np.unique(labels_fin, return_counts=True)
             label_counts = dict(zip(unique, counts))
-            print(f'For {j} time steps, our cluster distribution is {label_counts}')  # Print cluster distribution
+            print(f'For {j} time steps, our cluster distribution is {label_counts}')
 
-            # Check if the cluster with the highest count is the smallest in magnitude
             magnitudes = [np.linalg.norm(centre) for centre in cluster_centres_fin]
             max_clust = [key for key, value in label_counts.items() if value == max(counts)]
             if magnitudes[max_clust[0]] == min(magnitudes):
@@ -482,74 +426,57 @@ class JumpAnalysis:
             else:
                 print('False')
 
-            # Store the ratio of the most frequent cluster to the sum of all other clusters
             y_labels.append(max(counts) / (sum(counts) - max(counts)))
-            x_labels.append(j)  # Store the number of time jumps
+            x_labels.append(j)
 
-        # Plot the relationship between the number of time jumps and the stable cluster ratio
         plt.plot(x_labels, y_labels)
         plt.title('Stable Cluster Dominance with No. of Time Steps')
         plt.xlabel('Number of Time Jumps')
         plt.ylabel('No in stable cluster:No in all other clusters')
-        plt.savefig(self.savelocation_TET + f'HMM_stable_cluster_dominance')  # Save the plot
-        plt.show()  # Show the plot
+        plt.savefig(self.savelocation_TET + f'HMM_stable_cluster_dominance')
+        plt.show()
 
-    # Method to analyse consistency of clusters based on the number of time steps
     def determine_no_jumps_consistency(self):
-        x_values = []  # Stores the number of time steps (jumps)
-        y_values = []  # Stores the consistency (correct assignment ratio)
-        
-        # Loop through different values of time steps (from 1 to 29)
+        x_values = []
+        y_values = []
         for no_of_jumps in range(1, 30):
-            split_dict_skip = {}  # Dictionary to store grouped data with skips (time steps)
-            
-            # Group data by subject, week, and session
+            split_dict_skip = {}
             for (subject, week, session), group in self.df_csv_file_original.groupby(['Subject', 'Week', 'Session']):
-                group = group.iloc[::no_of_jumps].copy()  # Skip rows by no_of_jumps steps
-                # Calculate the differences for each feeling
+                group = group.iloc[::no_of_jumps].copy()
                 for feeling in self.feelings:
                     group[f'{feeling}_diff'] = -group[feeling].diff(-1)
                 split_dict_skip[(subject, week, session)] = group
 
-            df_csv_file_new = pd.concat([df for df in split_dict_skip.values()])  # Concatenate the split data
-            
-            # Group data again by subject, week, and session
+            df_csv_file_new = pd.concat([df for df in split_dict_skip.values()])
             split_dict = {}
             for (subject, week, session), group in df_csv_file_new.groupby(['Subject', 'Week', 'Session']):
                 split_dict[(subject, week, session)] = group.copy()
+            array = pd.concat([df[:-1] for df in split_dict.values()])
+            array_MI = array.copy()
+            array_MI['number'] = range(array.shape[0])
 
-            differences_array = pd.concat([df[:-1] for df in split_dict.values()])  # Concatenate data after skipping last row
-            differences_array_MI = differences_array.copy()
-            differences_array_MI['number'] = range(differences_array.shape[0])  # Add a sequence number column
-
-            wcss_best = float('inf')  # Initialise to store the best WCSS (Within-Cluster Sum of Squares)
-            labels_fin = []  # Store final cluster labels
-            cluster_centres_fin = []  # Store final cluster centers
-            
-            # Run k-means clustering 1000 times to get the best clustering
+            wcss_best = float('inf')
+            labels_fin = []
+            cluster_centres_fin = []
             for _ in range(1000):
-                kmeans = KMeans(3)  # Use 3 clusters for k-means
-                kmeans.fit(differences_array.iloc[:, -14:])  # Fit using the last 14 columns (assumed to be features)
-                if kmeans.inertia_ < wcss_best:  # Update if a better (lower) WCSS is found
+                kmeans = KMeans(3)
+                kmeans.fit(array.iloc[:, -14:])
+                if kmeans.inertia_ < wcss_best:
                     wcss_best = kmeans.inertia_
                     labels_fin = kmeans.labels_
                     cluster_centres_fin = kmeans.cluster_centers_
 
-            differences_array_MI['labels unnormalised vectors'] = labels_fin  # Add labels to data
-            downsampled_groups = []  # List to store downsampled data groups
-            
-            # Downsample each group based on no_of_jumps and store their original indices
+            array_MI['labels unnormalised vectors'] = labels_fin
+            downsampled_groups = []
             for (subject, week, session), group in self.df_csv_file_original.groupby(['Subject', 'Week', 'Session']):
                 downsampled = group.iloc[::no_of_jumps].copy()
-                downsampled = downsampled[:-1]  # Remove last row to match lengths
+                downsampled = downsampled[:-1]
                 downsampled['Original_Index'] = downsampled.index
                 downsampled_groups.append(downsampled)
 
-            df_downsampled = pd.concat(downsampled_groups)  # Concatenate downsampled groups
-            df_downsampled['Cluster_Label'] = labels_fin  # Add cluster labels to downsampled data
-            self.df_csv_file_original['Cluster_Label'] = np.nan  # Initialise cluster label column in original data
-            
-            # Propagate the cluster labels back to the original dataframe
+            df_downsampled = pd.concat(downsampled_groups)
+            df_downsampled['Cluster_Label'] = labels_fin
+            self.df_csv_file_original['Cluster_Label'] = np.nan
             for _, row in df_downsampled.iterrows():
                 original_index = row['Original_Index']
                 label = row['Cluster_Label']
@@ -564,57 +491,47 @@ class JumpAnalysis:
                 for i in range(start_idx, end_idx):
                     self.df_csv_file_original.at[group_indices[i], 'Cluster_Label'] = label
 
-            # Calculate the feeling differences for each feeling
             for feeling in self.feelings:
                 self.df_csv_file_original[f'{feeling}_diff'] = -self.df_csv_file_original[feeling].diff(-1)
 
-            # Calculate Hughes' measure for cluster consistency
             n_entries = 0
             correct_assignments = 0
             for i, row in self.df_csv_file_original.iterrows():
                 if not pd.isnull(row['Cluster_Label']) and not row[self.feelings_diffs].isnull().any():
-                    entry = row[self.feelings_diffs] * no_of_jumps  # Get the entry after scaling by jumps
-                    assigned_cluster = row['Cluster_Label']  # Get the assigned cluster
-                    distances = np.array([euclidean(entry, centre) for centre in cluster_centres_fin])  # Calculate distances to cluster centers
-                    closest_centre_idx = np.argmin(distances)  # Get the index of the closest centre
-                    if closest_centre_idx == assigned_cluster:  # If the assigned cluster is correct
+                    entry = row[self.feelings_diffs] * no_of_jumps
+                    assigned_cluster = row['Cluster_Label']
+                    distances = np.array([euclidean(entry, centre) for centre in cluster_centres_fin])
+                    closest_centre_idx = np.argmin(distances)
+                    if closest_centre_idx == assigned_cluster:
                         correct_assignments += 1
                     n_entries += 1
 
             if n_entries > 0:
-                hughes_measure = correct_assignments / n_entries  # Calculate Hughes' measure
-            y_values.append(hughes_measure)  # Store Hughes' measure
-            x_values.append(no_of_jumps)  # Store the number of time steps (jumps)
+                hughes_measure = correct_assignments / n_entries
+            y_values.append(hughes_measure)
+            x_values.append(no_of_jumps)
 
-        # Plot the relationship between the number of time steps and the Hughes' measure
         plt.plot(x_values, y_values)
         plt.title('Cluster Vectoral Consistency')
         plt.xlabel('Number of Time Steps')
         plt.ylabel('Correct Assignment Ratio')
-        plt.savefig(self.savelocation_TET + f'K_Vector_Cluster_Vectoral_consistency')  # Save the plot
-        plt.show()  # Show the plot
+        plt.savefig(self.savelocation_TET + f'HMM_Cluster_Vectoral_consistency')
+        plt.show()
 
-    # Method to analyse the autocorrelation of feelings over time
     def determine_no_of_jumps_autocorrelation(self):
-        split_dict = {}  # Dictionary to store grouped data by subject, week, and session
-        
-        # Group data by subject, week, and session
+        split_dict = {}
         for (subject, week, session), group in self.df_csv_file_original.groupby(['Subject', 'Week', 'Session']):
             split_dict[(subject, week, session)] = group[self.feelings].copy()
 
-        acf_results = {feeling: [] for feeling in self.feelings}  # Store autocorrelation results for each feeling
-        n_lags = 30  # Number of lags for autocorrelation
+        acf_results = {feeling: [] for feeling in self.feelings}
+        n_lags = 30
 
-        # Calculate autocorrelation for each feeling
         for key, df in split_dict.items():
             for feeling in self.feelings:
-                acf_value = acf(df[feeling], nlags=n_lags, fft=True)  # Calculate autocorrelation for the feeling
+                acf_value = acf(df[feeling], nlags=n_lags, fft=True)
                 acf_results[feeling].append(acf_value)
 
-        # Calculate average autocorrelation for each feeling
         acf_averages = {feeling: np.mean(np.vstack(acf_results[feeling]), axis=0) for feeling in self.feelings}
-        
-        # Plot the autocorrelation for each feeling
         plt.figure(figsize=(12, 8))
         for feeling, acf_vals in acf_averages.items():
             plt.plot(acf_vals, label=feeling)
@@ -622,8 +539,8 @@ class JumpAnalysis:
         plt.title('Average Autocorrelation Function for Each Feeling')
         plt.xlabel('Lag')
         plt.ylabel('Autocorrelation')
-        plt.legend(title='Feeling', bbox_to_anchor=(1.05, 1), loc='upper left')  # Show legend
-        plt.grid(True)  # Show grid
-        plt.tight_layout()  # Ensure tight layout for the plot
-        plt.savefig(self.savelocation_TET + f'K-Vector autocorrelation for each feeling')  # Save the plot
-        plt.show()  # Show the plot
+        plt.legend(title='Feeling', bbox_to_anchor=(1.05, 1), loc='upper left')
+        plt.grid(True)
+        plt.tight_layout()
+        plt.savefig(self.savelocation_TET + f'HMM autocorrelation for each feeling')
+        plt.show()

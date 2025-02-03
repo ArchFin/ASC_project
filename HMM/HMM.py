@@ -18,7 +18,7 @@ import yaml
 with open("Breathwork.yaml", "r") as file:
     config = yaml.safe_load(file)  # Converts YAML to a Python dictionary
 
-from Max_kmeans_methods import csv_splitter, principal_component_finder, KMeansVectorClustering, KMeansVectorVisualizer, JumpAnalysis
+from HMM_methods import csv_splitter, principal_component_finder, HMMClustering, Visualizer, JumpAnalysis
 
 csv_splitter_instance = csv_splitter(config['filelocation_TET'])
 df_csv_file_original = csv_splitter_instance.read_CSV()
@@ -28,7 +28,7 @@ principal_components, explained_variance_ratio, df_TET_feelings_prin = principal
 df_TET_feelings_prin_dict = principal_component_finder_instance.PCA_split(split_csv_array)
 
 
-kmeans_clustering_instance = KMeansVectorClustering(
+hmm_clustering_instance = HMMClustering(
     config['filelocation_TET'], 
     config['savelocation_TET'], 
     df_csv_file_original, 
@@ -37,17 +37,18 @@ kmeans_clustering_instance = KMeansVectorClustering(
     principal_components, 
     config['no_of_jumps'],
     config['colours'], 
-    config['colours_list']
+    config['colours_list'],
+    #n_components=4  # Number of hidden states
 )
 
 # Call the appropriate methods to get the values you need
-differences_array, dictionary_clust_labels = kmeans_clustering_instance.run()  # Ensure data is processed
+array, dictionary_clust_labels = hmm_clustering_instance.run()  # Ensure data is processed
 
 # Create an instance of KMeansVisualizer
-visualizer = KMeansVectorVisualizer(
+visualizer = Visualizer(
     filelocation_TET = config['filelocation_TET'], 
     savelocation_TET = config['savelocation_TET'],
-    differences_array=differences_array, 
+    array=array, 
     df_csv_file_original=df_csv_file_original, 
     dictionary_clust_labels=dictionary_clust_labels, 
     principal_components=principal_components, 
@@ -55,13 +56,13 @@ visualizer = KMeansVectorVisualizer(
     no_of_jumps=config['no_of_jumps']
 ).run()
 
-# jump_analysis = JumpAnalysis(
-#     config['filelocation_TET'], 
-#     config['savelocation_TET'], 
-#     df_csv_file_original, 
-#     config['feelings'], 
-#     config['feelings_diffs'])
-# jump_analysis.determine_no_jumps_stability()
-# jump_analysis.determine_no_jumps_consistency()
-# jump_analysis.determine_no_of_jumps_autocorrelation()
+jump_analysis = JumpAnalysis(
+    config['filelocation_TET'], 
+    config['savelocation_TET'], 
+    df_csv_file_original, 
+    config['feelings'], 
+    config['feelings_diffs'])
+jump_analysis.determine_no_jumps_stability()
+jump_analysis.determine_no_jumps_consistency()
+jump_analysis.determine_no_of_jumps_autocorrelation()
 

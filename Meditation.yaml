@@ -1,0 +1,58 @@
+filelocation_TET: '/Users/a_fin/Desktop/Year 4/Project/Data/NDT_all_12thDec_uncleaned.csv'  # File location of the Temporal Experience Traces (TET) for Breathwork, needs to be in CSV format.
+
+savelocation_TET: '/Users/a_fin/Desktop/Year 4/Project/Data/'
+
+feelings:
+  - MetaAwareness
+  - Aperture
+  - Dereification
+  - Conflict
+  - Boredom
+  - Wakefullness
+  - Emotion
+  - Clarity
+  - Effort
+  - Stability
+  - ObjectOrientation
+  - Source # Dimensions of the TET to be included in the clustering.
+
+feelings_diffs:
+  - MetaAwareness_diff
+  - Aperture_diff
+  - Dereification_diff
+  - Conflict_diff
+  - Boredom_diff
+  - Wakefullness_diff
+  - Emotion_diff
+  - Clarity_diff
+  - Effort_diff
+  - Stability_diff
+  - ObjectOrientation_diff
+  - Source_diff  # Vectorised version of the feelings columns.
+
+no_dimensions_PCA: 2  # Number of dimensions to run the PCA on.
+no_clust: 3  # Number of vectoral clusters, note total clusters will be one greater as the stable cluster is split into 2.
+no_of_jumps: 7  # Number of timestep jumps in the TET to form the vectors.
+
+headers:
+  Subject: 0
+  Week: 1
+  Session: 2
+
+colours:
+  0: red
+  1: green
+  2: blue
+  3: orange
+  4: pink
+  5: yellow
+
+colours_list:
+  - red
+  - green
+  - blue
+  - orange
+  - pink
+  - yellow
+
+header: 'Week'
