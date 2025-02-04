@@ -179,7 +179,7 @@ class HMMClustering:
         for n in range(min_states, max_states + 1):
             model = hmm.GaussianHMM(n_components=n, covariance_type="diag", n_iter=3000)
             model.fit(self.array.iloc[:, 4:4+len(self.feelings)])
-            score = model.bic(self.array.iloc[:, 4:4+len(self.feelings)])  
+            score = model.aic(self.array.iloc[:, 4:4+len(self.feelings)])  
             if score < best_score:
                 best_score = score
                 best_model = model
