@@ -58,8 +58,8 @@ for rep in range(num_repetitions):
     trans_prob, emission_means, emission_covs, nu = hmm.train(all_tet_data, num_iterations=10)
     
     # Decode using Viterbi (note: using a subset of features as in the original code)
-    state_seq, log_prob = hmm.decode(all_tet_data[:, :14])
-    alpha, beta, fs, log_lik = hmm.forward_backward(all_tet_data[:, :14])
+    state_seq, log_prob = hmm.decode(all_tet_data[:, :len(config['feelings'])])
+    alpha, beta, fs, log_lik = hmm.forward_backward(all_tet_data[:, :len(config['feelings'])])
     
     all_trans_probs[:, :, rep] = trans_prob
     all_emission_means[:, :, rep] = emission_means

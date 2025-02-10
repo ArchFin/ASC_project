@@ -55,13 +55,14 @@ visualizer = KMeansVectorVisualizer(
     no_of_jumps=config['no_of_jumps']
 ).run()
 
-# jump_analysis = JumpAnalysis(
-#     config['filelocation_TET'], 
-#     config['savelocation_TET'], 
-#     df_csv_file_original, 
-#     config['feelings'], 
-#     config['feelings_diffs'])
-# jump_analysis.determine_no_jumps_stability()
-# jump_analysis.determine_no_jumps_consistency()
-# jump_analysis.determine_no_of_jumps_autocorrelation()
+jump_analysis = JumpAnalysis(
+    config['filelocation_TET'], 
+    config['savelocation_TET'], 
+    df_csv_file_original, 
+    config['feelings'], 
+    config['feelings_diffs']
+)
 
+jump_analysis.determine_no_jumps_stability()
+jump_analysis.determine_no_jumps_consistency()
+jump_analysis.determine_no_of_jumps_autocorrelation()

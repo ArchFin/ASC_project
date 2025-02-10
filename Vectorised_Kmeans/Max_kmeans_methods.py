@@ -277,9 +277,8 @@ class KMeansVectorClustering:
         Perform secondary clustering analysis on the most stable cluster.
         """
         magnitudes = [np.linalg.norm(centre) for centre in self.cluster_centres_fin]
-        stable_cluster = np.argmin(magnitudes)  # Identify the most stable cluster
-
-        # Extract stable cluster data
+        stable_cluster = np.argmin(magnitudes)
+        self.differences_array['clust'] = self.labels_fin
         df_stable = self.differences_array[self.differences_array['clust'] == stable_cluster].copy()
 
         wcss_best = float('inf')
@@ -296,10 +295,17 @@ class KMeansVectorClustering:
                 labels_fin_stable = kmeans.labels_
                 cluster_centres_fin_stable = kmeans.cluster_centers_
 
-        # Assign new labels for stable clusters
+        # Update the cluster labels
+        df_stable = df_stable.drop('clust', axis=1)
         df_stable['clust_name'] = [f'{stable_cluster+1}a' if label == 0 else f'{stable_cluster+1}b' for label in labels_fin_stable]
         df_stable['clust'] = [stable_cluster if label == 0 else 3 for label in labels_fin_stable]
+        self.differences_array['clust_name'] = self.differences_array['clust'] + 1
         self.differences_array.update(df_stable)
+
+        # Create a dictionary for cluster labels
+        clust_labels = self.differences_array['clust'].unique() + 1
+        clust_name_labels = self.differences_array['clust_name'].unique()
+        self.dictionary_clust_labels = {clust: clust_name for clust, clust_name in zip(clust_labels, clust_name_labels)}
 
         # Plot stable cluster centroids
         alphabet = {0: 'a', 1: 'b'}
@@ -322,7 +328,7 @@ class KMeansVectorClustering:
         self.plot_results()
         self.plot_cluster_centroids()
         self.stable_cluster_analysis()
-        return self.differences_array
+        return self.differences_array, self.dictionary_clust_labels
 
 
 class KMeansVectorVisualizer:
@@ -409,7 +415,7 @@ class KMeansVectorVisualizer:
             plt.legend(handles=handles, labels=labels, title='Legend', bbox_to_anchor=(1.05, 1), loc='upper left')
             
             # Save the plot
-            plt.savefig(self.savelocation_TET + f'K_Vector_stable_cluster_centroids')
+            plt.savefig(self.savelocation_TET + f'K_Vector_stable_cluster_centroids{cleaned}')
             plt.show()
     
     def run(self):
@@ -489,7 +495,7 @@ class JumpAnalysis:
         plt.title('Stable Cluster Dominance with No. of Time Steps')
         plt.xlabel('Number of Time Jumps')
         plt.ylabel('No in stable cluster:No in all other clusters')
-        plt.savefig(self.savelocation_TET + f'HMM_stable_cluster_dominance')  # Save the plot
+        plt.savefig(self.savelocation_TET + f'KMeans_stable_cluster_dominance')  # Save the plot
         plt.show()  # Show the plot
 
     # Method to analyse consistency of clusters based on the number of time steps

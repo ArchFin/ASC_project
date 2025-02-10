@@ -16,17 +16,17 @@ from Max_HMM_methods_copy import Visualiser, HMMModel, DataLoader
 with open("Breathwork.yaml") as f:
     config = yaml.safe_load(f)
 
+# Load TET data.
 all_tet_data, session_ids, weeks, subjects, unique_session_ids = DataLoader.load_tet_data(
     config['filelocation_TET'], config['feelings']
 )
-
 all_tet_data = zscore(all_tet_data).values
 
 # Clustering.
 optimal_k = 4
 np.random.seed(12345)
 random.seed(12345)
-kmeans = KMeans(n_clusters=optimal_k, n_init=10, random_state=12345)
+kmeans = KMeans(n_clusters=optimal_k, n_init=100, random_state=12345)
 idx = kmeans.fit_predict(all_tet_data)
 C = kmeans.cluster_centers_
 
@@ -54,10 +54,7 @@ for rep in range(num_repetitions):
     print(f"Emission covariances shape: {hmm.emission_covs.shape}")
     print(f"Degrees of freedom shape: {hmm.nu.shape}")
 
-    # Train HMM using Baum–Welch.
     trans_prob, emission_means, emission_covs, nu = hmm.train(all_tet_data, num_iterations=10)
-
-    # Decode using Viterbi and perform forward–backward.
     state_seq, log_prob = hmm.decode(all_tet_data[:, :len(config['feelings'])])
     alpha, beta, fs, log_lik = hmm.forward_backward(all_tet_data[:, :len(config['feelings'])])
 
@@ -158,5 +155,8 @@ results_table = pd.DataFrame({
 print(results_table)
 print('Averaged Transition Matrix:')
 print(avg_trans_prob)
+
+# Visualise clusters and transitions.
 Visualiser.visualise_clusters_and_transitions(all_tet_data, avg_state_seq, labels, config['savelocation_TET'])
-Visualiser.visualise_session(results_table, 1, 101, config['savelocation_TET'])
+# Visualise the session with clear transition markers and interactive tooltips.
+Visualiser.visualise_session_with_transitions(results_table, 0, 101, config['savelocation_TET'])

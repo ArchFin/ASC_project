@@ -344,3 +344,5 @@ class Visualiser:
 
         plt.savefig(savelocation + f'HMM_visualise_sessions')
         plt.show()
+
+        

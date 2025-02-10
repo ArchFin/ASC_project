@@ -37,8 +37,8 @@ feelings_diffs:
 
 no_dimensions_PCA: 2  # Number of dimensions to run the PCA on.
 no_clust: 3  # Number of vectoral clusters, note total clusters will be one greater as the stable cluster is split into 2.
-no_of_jumps: 7  # Number of timestep jumps in the TET to form the vectors.
-no_states: 4 #Optimal number of states
+no_of_jumps: 1  # Number of timestep jumps in the TET to form the vectors.
+no_states: 4 # Optimal number of states
 
 headers:
   Subject: 0
@@ -49,23 +49,33 @@ colours:
   0: red
   1: green
   2: blue
-  3: orange
-  4: pink
-  5: yellow
-  6: cyan
-  7: magenta
-  8: black
-  9: white
-  10: purple
-  11: brown
-  12: grey
-  13: lime
-  14: navy
-  15: gold
-  16: skyblue
-  17: darkred
-  18: turquoise
-  19: olive
+  3: yellow
+  4: cyan
+  5: magenta
+  6: orange
+  7: purple
+  8: lime
+  9: navy
+  10: gold
+  11: turquoise
+  12: darkred
+  13: teal
+  14: violet
+  15: chartreuse
+  16: indigo
+  17: maroon
+  18: hotpink
+  19: royalblue
+  20: coral
+  21: olive
+  22: sienna
+  23: dodgerblue
+  24: fuchsia
+  25: forestgreen
+  26: orchid
+  27: tomato
+  28: darkorange
+  29: crimson
 
 colours_list:
   - red

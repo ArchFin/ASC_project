@@ -16,6 +16,7 @@ import yaml
 from scipy.spatial.distance import euclidean
 from hmmlearn import hmm
 
+
 # Load YAML file
 with open("Breathwork.yaml", "r") as file:
     config = yaml.safe_load(file)  # Converts YAML to a Python dictionary
