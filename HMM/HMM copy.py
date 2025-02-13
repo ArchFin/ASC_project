@@ -41,8 +41,10 @@ df_TET_feelings_prin_dict = principal_component_finder_instance.PCA_split(split_
 # Note: Here we use the original CSV file (df_csv_file_original) for clustering.
 # You might wish to change this if you have a different dataset.
 no_of_jumps = config['no_of_jumps']
+
 clustering = CustomHMMClustering(config['filelocation_TET'], config['savelocation_TET'],
                                     df_csv_file_original, feelings, principal_components, no_of_jumps)
+
 results_array, dictionary_clust_labels = clustering.run(num_states=4, num_iterations=20, num_repetitions=20)
 
 # Instantiate and run the visualiser.
@@ -60,17 +62,17 @@ visualiser_instance = Visualiser(
 visualiser_instance.run()
 
 
-analysis = HMMJumpAnalysis(
-    filelocation_TET=config['filelocation_TET'],
-    savelocation_TET=config['savelocation_TET'],
-    df_csv_file_original=df_csv_file_original,    # original CSV data as a DataFrame
-    feelings=feelings,  
-    principal_components=principal_components,  # From the PCA step
-    num_states=4,
-    num_iterations=10,
-    num_repetitions=10
-)
+# analysis = HMMJumpAnalysis(
+#     filelocation_TET=config['filelocation_TET'],
+#     savelocation_TET=config['savelocation_TET'],
+#     df_csv_file_original=df_csv_file_original,    # original CSV data as a DataFrame
+#     feelings=feelings,  
+#     principal_components=principal_components,  # From the PCA step
+#     num_states=4,
+#     num_iterations=10,
+#     num_repetitions=10
+# )
 
-analysis.determine_no_jumps_stability()
-analysis.determine_no_jumps_consistency()
-analysis.determine_no_of_jumps_autocorrelation()
+# analysis.determine_no_jumps_stability()
+# analysis.determine_no_jumps_consistency()
+# analysis.determine_no_of_jumps_autocorrelation()

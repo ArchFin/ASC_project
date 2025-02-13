@@ -410,7 +410,15 @@ class CustomHMMClustering:
         """
         num_emissions = len(self.feelings)
         data = self.array.iloc[:, 4:4+len(self.feelings)].values
-        N = data.shape[0]
+        
+        # Z-score normalization
+        self.mean = np.mean(data, axis=0)
+        self.std = np.std(data, axis=0)
+        self.std[self.std == 0] = 1.0  # Prevent division by zero
+        data_normalized = (data - self.mean) / self.std
+
+        # Rest of the method uses normalized data for training
+        N = data_normalized.shape[0]
 
         # Preallocate arrays to store results for each repetition.
         all_trans_probs = np.zeros((num_states, num_states, num_repetitions))
@@ -429,12 +437,12 @@ class CustomHMMClustering:
             
             # Create and train the model.
             model = HMMModel(num_states, num_emissions=num_emissions, random_seed=12345 + rep)
-            model.train(data, num_iterations=num_iterations)
+            model.train(data_normalized, num_iterations=num_iterations)
             
             # Decode state sequence and get log probability.
-            state_seq, log_prob = model.decode(data)
+            state_seq, log_prob = model.decode(data_normalized)
             # Obtain forward-backward results.
-            _, _, fs, log_lik = model.forward_backward(data)
+            _, _, fs, log_lik = model.forward_backward(data_normalized)
             
             # Optionally print shapes to verify.
             print(f"Transition probabilities shape: {model.trans_prob.shape}")
@@ -467,7 +475,8 @@ class CustomHMMClustering:
         # Assign the averaged state sequence and emission means as cluster centres.
         self.array['labels'] = avg_state_seq
         self.labels_fin = self.array['labels']
-        self.cluster_centres_fin = avg_emission_means
+        self.cluster_centres_fin = avg_emission_means * self.std + self.mean
+        
 
     def calculate_dictionary_clust_labels(self):
         """
@@ -503,7 +512,7 @@ class CustomHMMClustering:
         plt.title("HMM State Assignments (Custom t–Distribution HMM)")
         plt.tight_layout()
         plt.savefig(self.savelocation_TET + 'HMM_state_scatter_plot.png')
-        plt.show()
+        # plt.show()
 
         # Plot the cluster centres (emission means) on the principal component space.
         centres_projected = self.cluster_centres_fin.dot(self.principal_components)
@@ -517,7 +526,70 @@ class CustomHMMClustering:
         plt.title("State Centres for Custom HMM")
         plt.tight_layout()
         plt.savefig(self.savelocation_TET + 'state_centres_custom_HMM.png')
-        plt.show()
+        # plt.show()
+
+    def _plot_cluster_features(self):
+        """Plot bar charts of emission means for each cluster in original feature space"""
+        for cluster_idx in range(self.cluster_centres_fin.shape[0]):
+            plt.figure(figsize=(10, 6))
+            means = self.cluster_centres_fin[cluster_idx]
+            sorted_indices = np.argsort(means)[::-1]
+            
+            plt.bar(range(len(self.feelings)), means[sorted_indices], 
+                    color=plt.cm.tab10(cluster_idx))
+            plt.xticks(range(len(self.feelings)), 
+                       np.array(self.feelings)[sorted_indices], 
+                       rotation=45, ha='right')
+            plt.title(f'State {cluster_idx+1} - Feature Means')
+            plt.ylabel('Mean Value')
+            plt.tight_layout()
+            plt.savefig(self.savelocation_TET +
+                        f'state_{cluster_idx+1}_feature_means.png')
+            plt.close()
+
+    def _create_cluster_summary(self):
+        """Create text file summarizing key characteristics of each cluster"""
+        summary = []
+        for cluster_idx in range(self.cluster_centres_fin.shape[0]):
+            means = self.cluster_centres_fin[cluster_idx]
+            sorted_features = sorted(zip(self.feelings, means), 
+                                    key=lambda x: x[1], reverse=True)
+            
+            # Get top 3 features
+            top_features = [f"{feat} ({val:.2f})" for feat, val in sorted_features[:3]]
+            
+            # Get bottom 3 features
+            bottom_features = [f"{feat} ({val:.2f})" for feat, val in sorted_features[-3:]]
+            
+            summary.append(f"""
+            State {cluster_idx+1}:
+            - Dominant features: {', '.join(top_features)}
+            - Lowest features: {', '.join(bottom_features)}
+            - Mean vector norm: {np.linalg.norm(means):.2f}
+            """)
+        
+        # Save to file
+        with open( self.savelocation_TET+'cluster_summary.txt', 'w') as f:
+            f.write("\n".join(summary))
+
+    def analyze_transitions(self, num_states):
+        """Analyze state transition patterns"""
+        transition_counts = np.zeros((num_states, num_states))
+        for i in range(len(self.labels_fin)-1):
+            prev = self.labels_fin.iloc[i]
+            next_ = self.labels_fin.iloc[i+1]
+            transition_counts[prev, next_] += 1
+
+        # Normalize
+        transition_matrix = transition_counts / transition_counts.sum(axis=1, keepdims=True)
+        
+        plt.figure(figsize=(8, 6))
+        sns.heatmap(transition_matrix, annot=True, fmt=".2%", cmap="Blues",
+                    xticklabels=[f"State {i+1}" for i in range(num_states)],
+                    yticklabels=[f"State {i+1}" for i in range(num_states)])
+        plt.title('State Transition Probabilities')
+        plt.savefig(self.savelocation_TET + 'transition_matrix.png')
+        plt.close()
 
     def run(self, num_states, num_iterations, num_repetitions):
         """
@@ -528,6 +600,9 @@ class CustomHMMClustering:
         self.perform_clustering(num_states, num_iterations, num_repetitions)
         self.calculate_dictionary_clust_labels()
         self.plot_results()
+        self._plot_cluster_features()
+        self._create_cluster_summary()
+        self.analyze_transitions(num_states)
         return self.array, self.dictionary_clust_labels
 # =============================================================================
 # Visualiser Class for Trajectory Plotting
@@ -714,7 +789,7 @@ class HMMJumpAnalysis:
         plt.ylabel('Dominant Cluster Count : Other Clusters Count')
         save_path = os.path.join(self.savelocation_TET, f'HMM_stable_cluster_dominance_jump.png')
         plt.savefig(save_path)
-        plt.show()
+        
 
     def determine_no_jumps_consistency(self):
         """
@@ -780,8 +855,9 @@ class HMMJumpAnalysis:
             for idx, row in df_original.dropna(subset=['Cluster_Label']).iterrows():
                 true_label = row['Cluster_Label']
                 features = row[self.feelings].values
-                # Find nearest cluster centre in original feature space
-                distances = [euclidean(features, centre) for centre in emission_means]
+                features_normalized = (features - hmm_cluster.mean) / hmm_cluster.std
+                distances = [euclidean(features_normalized, centre) 
+                        for centre in hmm_cluster.cluster_centres_fin]
                 predicted_label = np.argmin(distances)
                 if predicted_label == true_label:
                     correct += 1
@@ -799,7 +875,7 @@ class HMMJumpAnalysis:
         plt.ylabel('Correct Assignment Ratio')
         save_path = os.path.join(self.savelocation_TET, f'HMM_consistency_plot.png')
         plt.savefig(save_path)
-        plt.show()
+        
 
     def determine_no_of_jumps_autocorrelation(self):
         """
@@ -835,4 +911,3 @@ class HMMJumpAnalysis:
         plt.tight_layout()
         save_path = os.path.join(self.savelocation_TET, f'HMM_autocorrelation.png')
         plt.savefig(save_path)
-        plt.show()
