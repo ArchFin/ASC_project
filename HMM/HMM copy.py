@@ -45,7 +45,7 @@ no_of_jumps = config['no_of_jumps']
 clustering = CustomHMMClustering(config['filelocation_TET'], config['savelocation_TET'],
                                     df_csv_file_original, feelings, principal_components, no_of_jumps)
 
-results_array, dictionary_clust_labels = clustering.run(num_states=4, num_iterations=20, num_repetitions=20)
+results_array, dictionary_clust_labels, transitions = clustering.run(num_states=2, num_iterations=10, num_repetitions=3)
 
 # Instantiate and run the visualiser.
 visualiser_instance = Visualiser(
@@ -57,7 +57,8 @@ visualiser_instance = Visualiser(
     principal_components=principal_components,
     feelings=feelings,
     no_of_jumps=no_of_jumps,
-    colours = config['colours']
+    colours = config['colours'],
+    transitions = transitions,
 )
 visualiser_instance.run()
 
@@ -68,7 +69,7 @@ visualiser_instance.run()
 #     df_csv_file_original=df_csv_file_original,    # original CSV data as a DataFrame
 #     feelings=feelings,  
 #     principal_components=principal_components,  # From the PCA step
-#     num_states=4,
+#     num_states=2,
 #     num_iterations=10,
 #     num_repetitions=10
 # )

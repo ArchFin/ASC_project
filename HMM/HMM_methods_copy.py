@@ -11,6 +11,7 @@ from scipy.spatial.distance import cdist, euclidean
 from scipy.linalg import inv, det
 from scipy.special import psi, polygamma, gamma 
 from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 import seaborn as sns
@@ -70,83 +71,95 @@ class principal_component_finder:
         self.csv_file_TET = csv_file[feelings]
         self.feelings = feelings
         self.savelocation = savelocation_TET
+        self.no_dimensions = no_dimensions
         
-        # Compute correlation matrix and perform PCA on it.
-        corr_matrix = self.csv_file_TET.corr()
+        # Standardize the data
+        scaler = StandardScaler()
+        scaled_data = scaler.fit_transform(self.csv_file_TET)
+
+        # Compute PCA
         pca = PCA(n_components=no_dimensions)
-        # Here we use the PCA components (transformation matrix) rather than the transformed data.
-        self.principal_components = pca.fit_transform(corr_matrix)
+        self.principal_components = pca.fit(scaled_data).components_
         self.explained_variance_ratio = pca.explained_variance_ratio_
 
     def PCA_TOT(self):
         """
         Projects the data onto the principal components and plots bar charts for each component.
-        Returns the principal components, explained variance ratio and the transformed data.
+        Returns the principal components, explained variance ratio, and the transformed data.
         """
-        df_TET_feelings_prin = self.csv_file_TET.dot(self.principal_components)
-        
+        # Standardize the data
+        scaler = StandardScaler()
+        scaled_data = scaler.fit_transform(self.csv_file_TET)  # <-- Standardized data
+
+        # Compute PCA
+        pca = PCA(n_components=self.no_dimensions)  # Added self. for variable reference
+        self.principal_components = pca.fit(scaled_data).components_
+        self.explained_variance_ratio = pca.explained_variance_ratio_
+
+        # Project STANDARDIZED DATA 
+        df_TET_feelings_prin = pd.DataFrame(scaled_data @ self.principal_components.T,  # <-- KEY FIX
+                                            columns=[f"PC{i+1}" for i in range(self.no_dimensions)])
+
         # Plot bar charts for each principal component.
-        for i in range(self.principal_components.shape[1]):
-            y_values = [self.principal_components[j][i] for j in range(len(self.feelings))]
+        for i in range(self.principal_components.shape[0]):
             plt.figure()
-            plt.bar(self.feelings, y_values)
+            plt.bar(self.feelings, self.principal_components[i])
             plt.title(f'Principal Component {i+1}')
             plt.xticks(rotation=45, ha='right')
             plt.tight_layout()
             plt.savefig(os.path.join(self.savelocation, f'principal_component{i+1}.png'))
             plt.close()
-        
+
         # Scatter plot of the first two principal components.
         plt.figure()
         plt.scatter(df_TET_feelings_prin.iloc[:, 0], df_TET_feelings_prin.iloc[:, 1], s=0.5)
-        plt.xlabel('Principal Component 1 (bored/effort)')
-        plt.ylabel('Principal Component 2 (calm)')
-        plt.title('Plot of all the data points in PCA space')
-        plt.xlim(-6, 6)
-        plt.ylim(-1, 2)
+        plt.xlabel('Principal Component 1')
+        plt.ylabel('Principal Component 2')
+        plt.title('PCA Projection')
+        # plt.xlim(-6, 6)
+        # plt.ylim(-1, 2)
         plt.tight_layout()
         plt.savefig(os.path.join(self.savelocation, 'all_data_in_PCA.png'))
         plt.close()
-        
+
         # Bar chart for explained variance ratio.
-        labels = [f'Principal Component {i+1}' for i in range(self.principal_components.shape[1])]
+        labels = [f'Principal Component {i+1}' for i in range(len(self.explained_variance_ratio))]
         plt.figure(figsize=(10, 6))
         plt.bar(labels, self.explained_variance_ratio, color='skyblue')
-        plt.title('Explained Variance Ratio of PCA Components')
+        plt.title('Explained Variance Ratio')
         plt.xlabel('Principal Components')
-        plt.ylabel('Explained Variance Ratio')
+        plt.ylabel('Variance Explained')
         plt.xticks(rotation=45)
         plt.tight_layout()
         plt.savefig(os.path.join(self.savelocation, 'explained_variance_ratio.png'))
         plt.close()
-        
+
         return self.principal_components, self.explained_variance_ratio, df_TET_feelings_prin
+
 
     def PCA_split(self, split_df_array):
         """
         Projects each split dataset onto the principal components and plots scatter plots.
         Returns a dictionary mapping split names to their PCA-transformed data.
         """
-        split_df_array_TET = [[item[0], item[1][self.feelings]] for item in split_df_array]
-        split_csv_TET = {item[0]: item[1] for item in split_df_array_TET}
-        df_TET_feelings_prin_dict = {name: split_csv_TET[name].dot(self.principal_components) for name in split_csv_TET.keys()}
-        
+        split_csv_TET = {item[0]: item[1][self.feelings] for item in split_df_array}
+        df_TET_feelings_prin_dict = {name: df @ self.principal_components.T for name, df in split_csv_TET.items()}
+
         for key, value in df_TET_feelings_prin_dict.items():
             plt.figure()
             plt.scatter(value.iloc[:, 0], value.iloc[:, 1], s=0.5)
-            plt.title(key)
-            plt.xlabel('Principal Component 1 (bored/effort)')
-            plt.ylabel('Principal Component 2 (calm)')
-            plt.xlim(-6, 6)
-            plt.ylim(-1, 2)
+            plt.title(f'PCA Projection: {key}')
+            plt.xlabel('Principal Component 1')
+            plt.ylabel('Principal Component 2')
+            # plt.xlim(-6, 6)
+            # plt.ylim(-1, 2)
             plt.tight_layout()
             plt.savefig(os.path.join(self.savelocation, f'PCA_{key}.png'))
             plt.close()
-        
-        return df_TET_feelings_prin_dict
 
+        return df_TET_feelings_prin_dict
 # =============================================================================
-# Custom HMM Model using multivariate t–distribution (with placeholder nu estimation)
+# Custom HMM Model using multivariate t–distribution 
 # =============================================================================
 class HMMModel:
     def __init__(self, num_states, num_emissions, data=None, random_seed=12345):
@@ -159,7 +172,10 @@ class HMMModel:
         if data is not None:
             kmeans = KMeans(n_clusters=num_states, random_state=random_seed).fit(data)
             self.emission_means = kmeans.cluster_centers_
-            self.trans_prob = np.full((num_states, num_states), 1/num_states)
+            # Diagonal-dominated initialization (favor state persistence):
+            self.trans_prob = np.eye(num_states) * 0.8 + np.ones((num_states, num_states)) * 0.2/(num_states-1)
+            np.fill_diagonal(self.trans_prob, 0.8)  # 80% self-transition probability
+            self.trans_prob /= self.trans_prob.sum(axis=1, keepdims=True)  # Ensure row normalization
         else:
             self.emission_means = np.random.randn(num_states, num_emissions)
             self.trans_prob = np.random.dirichlet(np.ones(num_states), size=num_states)
@@ -184,7 +200,7 @@ class HMMModel:
                     - 0.5 * np.log(det_Sigma) 
                     - ((nu + d)/2) * np.log(1 + mahalanobis/nu))
         return np.exp(log_norm)
-    
+
     @staticmethod
     def make_positive_definite(cov_matrix):
         cov_matrix = 0.5 * (cov_matrix + cov_matrix.T)  # Force symmetry
@@ -193,9 +209,9 @@ class HMMModel:
         eigenvalues, eigenvectors = np.linalg.eigh(cov_matrix)
         eigenvalues = np.clip(eigenvalues, 1e-6, None)  # Clip eigenvalues
         return eigenvectors @ np.diag(eigenvalues) @ eigenvectors.T
-    
-    # Existing methods remain similar but with enhanced nu estimation:
-    def estimate_nu(self, gamma_vals, data, mean, covariance, max_iter=100):
+
+    @staticmethod
+    def estimate_nu(gamma_vals, data, mean, covariance, max_iter=100):
         N, d = data.shape
         diff = data - mean
         inv_cov = np.linalg.pinv(covariance)  # More stable pseudo-inverse
@@ -220,10 +236,13 @@ class HMMModel:
             nu = np.clip(nu_new, 2, 10)
             
         return nu
+    
     @staticmethod
-    def update_transition_probabilities(xi):
-        trans_prob = np.sum(xi, axis=2)
-        trans_prob += 1e-12  # Add a small epsilon to avoid division by zero
+    def update_transition_probabilities(xi, num_states):
+        # regularized version:
+        state_persistence_prior = 5.0  # Higher values = stronger self-transition preference
+        trans_prob = np.sum(xi, axis=2) + np.eye(num_states) * state_persistence_prior
+        trans_prob += 1e-12  # Numerical stability
         trans_prob /= trans_prob.sum(axis=1, keepdims=True)
         return trans_prob
 
@@ -244,7 +263,13 @@ class HMMModel:
             diff = data - means[j, :]
             covariances[j, :, :] = (diff.T * gamma_j) @ diff / sum_gamma
             covariances[j, :, :] = make_positive_definite(covariances[j, :, :])
+            # covariances[j, :, :] = (diff.T * gamma_j) @ diff / sum_gamma
+            # Add regularization and mean separation:
+            covariances[j, :, :] += np.eye(num_emissions) * 1e-3  # Covariance regularization
+            if j > 0:  # Push cluster means apart
+                means[j, :] += 0 * (means[j, :] - np.mean(means[:j, :], axis=0))
             nu[j] = estimate_nu(gamma_j, data, means[j, :], covariances[j, :, :])
+
         return means, covariances, nu
 
     def _compute_emission_probs(self, data):
@@ -292,7 +317,7 @@ class HMMModel:
         gamma_vals /= gamma_vals.sum(axis=1, keepdims=True)
 
         for t in range(num_data - 1):
-            denominator = np.dot(alpha[t, :], self.trans_prob * (emission_probs[t + 1, :] * beta[t + 1, :]).reshape(1, -1)).sum()
+            denominator = np.sum(alpha[t, :] @ self.trans_prob * emission_probs[t + 1, :] @ beta[t + 1, :])
             if denominator == 0:
                 continue
             xi[:, :, t] = (alpha[t, :].reshape(-1, 1) * self.trans_prob *
@@ -359,20 +384,29 @@ class HMMModel:
         log_prob = np.sum(np.log(np.max(delta, axis=1) + 1e-12))
         return state_seq, log_prob
 
-    def train(self, data, num_iterations):
+    def train(self, data, num_iterations, num_states):
         """
         Baum–Welch training loop. At each iteration, compute the E‐step and update model parameters.
         """
         for iteration in range(num_iterations):
             print(f"Training iteration {iteration + 1} of {num_iterations}")
+            # Gradually increase transition flexibility
+            transition_constraint = max(0.5, 1.0 - iteration/num_iterations)
+            
+            # Modified E-step with constraints
             gamma_vals, xi = self.e_step(data)
-            self.trans_prob = self.update_transition_probabilities(xi)
+            
+            # Apply curriculum learning to transitions
+            constrained_xi = xi * transition_constraint
+            self.trans_prob = self.update_transition_probabilities(constrained_xi, num_states)
+
             self.emission_means, self.emission_covs, self.nu = self.update_emission_parameters(
                 data, gamma_vals, self.num_states,
                 make_positive_definite=self.make_positive_definite,
                 estimate_nu=self.estimate_nu
             )
         return self.trans_prob, self.emission_means, self.emission_covs, self.nu
+
 # =============================================================================
 # Custom HMM Clustering using the Custom HMM Model
 # =============================================================================
@@ -436,8 +470,8 @@ class CustomHMMClustering:
             random.seed(12345 + rep)
             
             # Create and train the model.
-            model = HMMModel(num_states, num_emissions=num_emissions, random_seed=12345 + rep)
-            model.train(data_normalized, num_iterations=num_iterations)
+            model = HMMModel(num_states, num_emissions=num_emissions, data=data_normalized,  random_seed=12345 + rep)
+            model.train(data_normalized, num_iterations=num_iterations, num_states = num_states)
             
             # Decode state sequence and get log probability.
             state_seq, log_prob = model.decode(data_normalized)
@@ -459,12 +493,12 @@ class CustomHMMClustering:
             all_log_probs[rep] = log_prob
             all_log_liks[rep] = log_lik
 
-            
+        
         # Average results across repetitions.
         avg_trans_prob = np.mean(all_trans_probs, axis=2)
         avg_emission_means = np.mean(all_emission_means, axis=2)
         avg_emission_covs = np.mean(all_emission_covs, axis=3)
-        avg_fs = np.mean(all_fs, axis=2)
+        self.avg_fs = np.mean(all_fs, axis=2)
         # For state sequence, take the mode at each time point.
         avg_state_seq = np.apply_along_axis(lambda x: np.bincount(x.astype(int)).argmax(), axis=1, arr=all_state_seqs)
         avg_log_prob = np.mean(all_log_probs)
@@ -477,7 +511,6 @@ class CustomHMMClustering:
         self.labels_fin = self.array['labels']
         self.cluster_centres_fin = avg_emission_means * self.std + self.mean
         
-
     def calculate_dictionary_clust_labels(self):
         """
         Calculate a dictionary mapping each unique cluster label to a human-readable string.
@@ -493,8 +526,8 @@ class CustomHMMClustering:
         The cluster centres (emission means) are also projected and plotted as arrows.
         """
         # Compute the principal component projection for the data.
-        data_features = self.array.iloc[:, 4:4+len(self.feelings)]
-        projected = data_features.dot(self.principal_components)
+        data_features = self.array[self.feelings]  # Ensure correct feature extraction
+        projected = data_features.dot(self.principal_components.T)
         self.array["principal component 1"] = projected.iloc[:, 0]
         self.array["principal component 2"] = projected.iloc[:, 1]
 
@@ -512,21 +545,23 @@ class CustomHMMClustering:
         plt.title("HMM State Assignments (Custom t–Distribution HMM)")
         plt.tight_layout()
         plt.savefig(self.savelocation_TET + 'HMM_state_scatter_plot.png')
-        # plt.show()
+        plt.close()
 
-        # Plot the cluster centres (emission means) on the principal component space.
-        centres_projected = self.cluster_centres_fin.dot(self.principal_components)
+        # Correctly standardize cluster centers before projection
+        centres_normalized = (self.cluster_centres_fin - self.mean) / self.std
+        centres_projected = centres_normalized.dot(self.principal_components.T)
+        
         plt.figure(figsize=(8, 6))
         for i in range(centres_projected.shape[0]):
             plt.arrow(0, 0, centres_projected[i, 0], centres_projected[i, 1],
-                      head_width=0.05, head_length=0.05, color=colours[i], length_includes_head=True)
+                    head_width=0.01, head_length=0.05, linewidth=0.5, color=colours[i], length_includes_head=True)
             plt.text(centres_projected[i, 0], centres_projected[i, 1], f'State {i+1}', color=colours[i])
         plt.xlabel("Principal Component 1")
         plt.ylabel("Principal Component 2")
-        plt.title("State Centres for Custom HMM")
+        plt.title("State Centres for Custom HMM (Standardized)")
         plt.tight_layout()
         plt.savefig(self.savelocation_TET + 'state_centres_custom_HMM.png')
-        # plt.show()
+        plt.close()
 
     def _plot_cluster_features(self):
         """Plot bar charts of emission means for each cluster in original feature space"""
@@ -556,10 +591,10 @@ class CustomHMMClustering:
                                     key=lambda x: x[1], reverse=True)
             
             # Get top 3 features
-            top_features = [f"{feat} ({val:.2f})" for feat, val in sorted_features[:3]]
+            top_features = [f"{feat} ({val:.2f})" for feat, val in sorted_features[:4]]
             
             # Get bottom 3 features
-            bottom_features = [f"{feat} ({val:.2f})" for feat, val in sorted_features[-3:]]
+            bottom_features = [f"{feat} ({val:.2f})" for feat, val in sorted_features[-4:]]
             
             summary.append(f"""
             State {cluster_idx+1}:
@@ -573,23 +608,73 @@ class CustomHMMClustering:
             f.write("\n".join(summary))
 
     def analyze_transitions(self, num_states):
-        """Analyze state transition patterns"""
-        transition_counts = np.zeros((num_states, num_states))
-        for i in range(len(self.labels_fin)-1):
-            prev = self.labels_fin.iloc[i]
-            next_ = self.labels_fin.iloc[i+1]
-            transition_counts[prev, next_] += 1
+        """
+        Analyze transitions per group (Subject, Week, Session) using dynamic thresholding.
+        Each transition tuple: (transition_start, transition_end, from_state, to_state)
+        """
+        self.group_transitions = {}  # dictionary to store transitions per group
 
-        # Normalize
-        transition_matrix = transition_counts / transition_counts.sum(axis=1, keepdims=True)
-        
-        plt.figure(figsize=(8, 6))
-        sns.heatmap(transition_matrix, annot=True, fmt=".2%", cmap="Blues",
-                    xticklabels=[f"State {i+1}" for i in range(num_states)],
-                    yticklabels=[f"State {i+1}" for i in range(num_states)])
-        plt.title('State Transition Probabilities')
-        plt.savefig(self.savelocation_TET + 'transition_matrix.png')
-        plt.close()
+        # Loop over each group (Subject, Week, Session)
+        for heading, group in self.array.groupby(['Subject', 'Week', 'Session']):
+            group_labels = group['labels'].values
+            
+            # Determine which columns to use for features.
+            # If self.avg_fs is a DataFrame, use its columns; otherwise, assume self.avg_fs is a NumPy array
+            # and use self.feelings as the feature names.
+            if hasattr(self.avg_fs, 'columns'):
+                fs_columns = self.avg_fs.columns
+            else:
+                fs_columns = self.feelings  # adjust this if your features are stored differently
+
+            # Extract the feature matrix for this group.
+            group_fs = group[fs_columns].values
+            
+            # Calculate the dynamic threshold for this group.
+            threshold = self.calculate_dynamic_threshold(group[fs_columns])
+            min_state_duration = 5  # adjust as needed
+
+            transitions = []
+            # Use segment_start to mark the beginning of the current state segment.
+            segment_start = 0
+
+            # Iterate over the state sequence for this group, starting at the second element.
+            for i in range(1, len(group_labels)):
+                # Check if the state changed between the previous index and the current one.
+                if group_labels[i] != group_labels[i - 1]:
+                    # Only consider the transition if the current segment is long enough.
+                    if i - segment_start >= min_state_duration:
+                        # new_state is the state we transitioned into.
+                        new_state = group_labels[i]
+                        # Set initial boundaries: the change occurs between i-1 and i.
+                        transition_start = i - 1  # Last index of the old state.
+                        transition_end = i        # First index of the new state.
+
+                        # Adjust the start boundary: look backward as long as the difference is significant.
+                        while (transition_start > segment_start and
+                            np.abs(group_fs[transition_start, new_state] - group_fs[transition_start - 1, new_state]) > threshold / 2):
+                            transition_start -= 1
+
+                        # Adjust the end boundary: look forward as long as the difference remains significant.
+                        while (transition_end < len(group_labels) - 1 and
+                            np.abs(group_fs[transition_end, new_state] - group_fs[transition_end + 1, new_state]) > threshold / 2):
+                            transition_end += 1
+
+                        # Append the transition tuple: (start index, end index, from_state, to_state)
+                        transitions.append((transition_start, transition_end, group_labels[i - 1], new_state))
+
+                    # Update the segment_start to the current index for the next segment.
+                    segment_start = i
+
+            # Save the transitions for this group.
+            self.group_transitions[heading] = transitions
+
+    def calculate_dynamic_threshold(self, avg_fs):
+        # Compute absolute changes in state probabilities
+        changes = np.abs(np.diff(avg_fs, axis=0))
+        mean_change = np.mean(changes)
+        std_change = np.std(changes)
+        threshold = mean_change + 0.05 * std_change  # From Maria's paper (Page 19)
+        return threshold
 
     def run(self, num_states, num_iterations, num_repetitions):
         """
@@ -603,13 +688,14 @@ class CustomHMMClustering:
         self._plot_cluster_features()
         self._create_cluster_summary()
         self.analyze_transitions(num_states)
-        return self.array, self.dictionary_clust_labels
+        return self.array, self.dictionary_clust_labels , self.group_transitions
+
 # =============================================================================
 # Visualiser Class for Trajectory Plotting
 # =============================================================================
 class Visualiser:
     def __init__(self, filelocation_TET, savelocation_TET, array, df_csv_file_original,
-                 dictionary_clust_labels, principal_components, feelings, no_of_jumps, colours):
+                 dictionary_clust_labels, principal_components, feelings, no_of_jumps, colours, transitions):
         self.filelocation_TET = filelocation_TET
         self.savelocation_TET = savelocation_TET
         self.array = array
@@ -619,13 +705,14 @@ class Visualiser:
         self.feelings = feelings
         self.no_of_jumps = no_of_jumps
         self.color_map = colours
+        self.group_transitions = transitions  
 
     def preprocess_data(self):
         """
-        Project feelings data onto the principal components and group the data by Subject, Week and Session.
+        Project feelings data onto the principal components and group the data by Subject, Week, and Session.
         """
         self.array[["principal component 1 non-diff", "principal component 2 non-diff"]] = \
-            self.array[self.feelings].dot(self.principal_components)
+            self.array[self.feelings].dot(self.principal_components.T)
             
         self.traj_transitions_dict = {}
         self.traj_transitions_dict_original = {}
@@ -637,23 +724,33 @@ class Visualiser:
 
     def plot_trajectories(self):
         """
-        For each trajectory, plot the time series for each feeling and mark segments based on cluster assignments.
+        For each subject/group trajectory, plot the time series for each feeling and overlay:
+        - Cluster-based shading (if available)
+        - Vertical dashed lines indicating the start and end of transitions
+        - Text annotations showing the state change (from_state → to_state)
         """
+        time_jump = 28  # as in the original implementation
+
         for heading, value in self.traj_transitions_dict_original.items():
             plt.figure()
+            
+            # Build the time axis for this group.
+            starting_time = 0
+            time_array = np.arange(starting_time, starting_time + time_jump * value.shape[0], time_jump)
+            
+            # Plot each feeling’s time series (scaled as needed).
             for feeling in self.feelings:
-                starting_time = 0
-                time_jump = 28
-                time_array = np.arange(starting_time, starting_time + time_jump * value.shape[0], time_jump)
                 plt.plot(time_array, value[feeling] * 10, label=feeling)
-                
+            
+            # Clean up the title from the heading tuple.
             combined = ''.join(map(str, heading))
             cleaned = combined.replace("\\", "").replace("'", "").replace(" ", "").replace("(", "").replace(")", "")
             plt.title(cleaned)
-            plt.xlabel('Time')
+            plt.xlabel('Time/s')
             plt.ylabel('Rating')
             plt.tight_layout()
             
+            # --- Cluster-based shading (if applicable) ---
             if heading in self.traj_transitions_dict:
                 traj_group = self.traj_transitions_dict[heading]
                 prev_color_val = traj_group['labels'].iloc[0]
@@ -668,14 +765,32 @@ class Visualiser:
                                     facecolor=self.color_map.get(prev_color_val, 'grey'), alpha=0.3)
                         start_index = index
                         prev_color_val = color_val
-
+            
+            # --- Transition markers with labels (per group) ---
+            if heading in self.group_transitions:
+                for (start_idx, end_idx, from_state, to_state) in self.group_transitions[heading]:
+                    start_time = start_idx * (time_jump * self.no_of_jumps)
+                    end_time = end_idx * (time_jump * self.no_of_jumps)
+                    plt.axvline(x=start_time, color='black', linestyle='--', alpha=0.5, linewidth=1)
+                    plt.axvline(x=end_time, color='black', linestyle='--', alpha=0.5, linewidth=1)
+                    # Calculate mid-point for the annotation.
+                    mid_time = (start_time + end_time) / 2
+                    # Position the text near the top of the plot.
+                    y_pos = plt.ylim()[1] * 0.95
+                    plt.text(mid_time, y_pos, f'State {from_state+1} → {to_state+1}', 
+                            horizontalalignment='center', verticalalignment='top', fontsize=8, color='black')
+                    # Optionally, uncomment the next line to add a shaded region between markers.
+                    # plt.axvspan(start_time, end_time, facecolor='gray', alpha=0.2)
+            
+            # --- Legend ---
             cluster_patches = [mpatches.Patch(color=color, label=f'Cluster {cluster}')
-                               for cluster, color in self.color_map.items()]
+                            for cluster, color in self.color_map.items()]
             handles, labels = plt.gca().get_legend_handles_labels()
             handles.extend(cluster_patches)
             labels.extend([f'Cluster {label}' for label in self.dictionary_clust_labels.values()])
             plt.legend(handles=handles, labels=labels, title='Legend', bbox_to_anchor=(1.05, 1), loc='upper left')
             
+            # --- Save the figure ---
             save_path = os.path.join(self.savelocation_TET, f'HMM_stable_cluster_centroids{cleaned}.png')
             plt.savefig(save_path, bbox_inches='tight')
             plt.close()
@@ -683,6 +798,7 @@ class Visualiser:
     def run(self):
         self.preprocess_data()
         self.plot_trajectories()
+
 # ==================================================================================|
 # Jump Analysis Class (using raw feelings rather than differences like in k-means)  |
 # ==================================================================================|

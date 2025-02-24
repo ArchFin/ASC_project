@@ -103,8 +103,8 @@ class principal_component_finder:
         # Scatter plot of the first two principal components
         plt.figure()
         plt.scatter(df_TET_feelings_prin[0], df_TET_feelings_prin[1], s=0.5)
-        plt.xlabel('Principal Component 1 (bored/effort)')
-        plt.ylabel('Principal Component 2 (calm)')
+        plt.xlabel('Principal Component 1')
+        plt.ylabel('Principal Component 2')
         plt.title('Plot of all the data points in PCA space')
         plt.xlim(-6, 6)
         plt.ylim(-1, 2)

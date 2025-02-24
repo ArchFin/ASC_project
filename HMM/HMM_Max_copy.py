@@ -23,7 +23,7 @@ all_tet_data, session_ids, weeks, subjects, unique_session_ids = DataLoader.load
 all_tet_data = zscore(all_tet_data).values
 
 # Clustering.
-optimal_k = 4
+optimal_k = 2
 np.random.seed(12345)
 random.seed(12345)
 kmeans = KMeans(n_clusters=optimal_k, n_init=100, random_state=12345)
