@@ -34,6 +34,7 @@ feelings = config['feelings']
 principal_component_finder_instance = principal_component_finder(df_csv_file_original, feelings,
                                                                     config['no_dimensions_PCA'],
                                                                     config['savelocation_TET'])
+
 principal_components, explained_variance_ratio, df_TET_feelings_prin = principal_component_finder_instance.PCA_TOT()
 df_TET_feelings_prin_dict = principal_component_finder_instance.PCA_split(split_csv_array)
 
@@ -45,7 +46,7 @@ no_of_jumps = config['no_of_jumps']
 clustering = CustomHMMClustering(config['filelocation_TET'], config['savelocation_TET'],
                                     df_csv_file_original, feelings, principal_components, no_of_jumps)
 
-results_array, dictionary_clust_labels, transitions = clustering.run(num_states=2, num_iterations=10, num_repetitions=3)
+results_array, dictionary_clust_labels, transitions = clustering.run(num_states=2, num_iterations=50, num_repetitions=50)
 
 # Instantiate and run the visualiser.
 visualiser_instance = Visualiser(
@@ -77,3 +78,4 @@ visualiser_instance.run()
 # analysis.determine_no_jumps_stability()
 # analysis.determine_no_jumps_consistency()
 # analysis.determine_no_of_jumps_autocorrelation()
+

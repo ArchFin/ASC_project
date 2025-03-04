@@ -19,16 +19,19 @@ import networkx as nx
 from statsmodels.tsa.stattools import acf
 from hmmlearn import hmm  # Only if you still need it somewhere
 from tqdm import tqdm  # For progress bars
+from scipy.special import logsumexp
+from scipy.optimize import linear_sum_assignment
+from collections import defaultdict
 
-# =============================================================================
-# Configuration via YAML
-# =============================================================================
+# =============================================================================|
+# Configuration via YAML                                                       |
+# =============================================================================|
 with open("Breathwork.yaml", "r") as file:
     config = yaml.safe_load(file)  # Converts YAML to a Python dictionary
 
-# =============================================================================
-# CSV File Handling
-# =============================================================================
+# =============================================================================|
+# CSV File Handling                                                            |
+# =============================================================================|
 class csv_splitter:
     def __init__(self, file_path):
         """
@@ -60,9 +63,9 @@ class csv_splitter:
         split_df_array = [[key, value] for key, value in split_df.items()]
         return split_df, split_df_array
 
-# =============================================================================
-# Principal Component Finder
-# =============================================================================
+# =============================================================================|
+# Principal Component Finder                                                   |
+# =============================================================================|
 class principal_component_finder:
     def __init__(self, csv_file, feelings, no_dimensions, savelocation_TET):
         """
@@ -75,11 +78,11 @@ class principal_component_finder:
         
         # Standardize the data
         scaler = StandardScaler()
-        scaled_data = scaler.fit_transform(self.csv_file_TET)
+        self.scaled_data = scaler.fit_transform(self.csv_file_TET)
 
         # Compute PCA
         pca = PCA(n_components=no_dimensions)
-        self.principal_components = pca.fit(scaled_data).components_
+        self.principal_components = pca.fit(self.scaled_data).components_
         self.explained_variance_ratio = pca.explained_variance_ratio_
 
     def PCA_TOT(self):
@@ -87,17 +90,9 @@ class principal_component_finder:
         Projects the data onto the principal components and plots bar charts for each component.
         Returns the principal components, explained variance ratio, and the transformed data.
         """
-        # Standardize the data
-        scaler = StandardScaler()
-        scaled_data = scaler.fit_transform(self.csv_file_TET)  # <-- Standardized data
-
-        # Compute PCA
-        pca = PCA(n_components=self.no_dimensions)  # Added self. for variable reference
-        self.principal_components = pca.fit(scaled_data).components_
-        self.explained_variance_ratio = pca.explained_variance_ratio_
 
         # Project STANDARDIZED DATA 
-        df_TET_feelings_prin = pd.DataFrame(scaled_data @ self.principal_components.T,  # <-- KEY FIX
+        df_TET_feelings_prin = pd.DataFrame(self.scaled_data @ self.principal_components.T,  # <-- KEY FIX
                                             columns=[f"PC{i+1}" for i in range(self.no_dimensions)])
 
         # Plot bar charts for each principal component.
@@ -142,25 +137,29 @@ class principal_component_finder:
         Projects each split dataset onto the principal components and plots scatter plots.
         Returns a dictionary mapping split names to their PCA-transformed data.
         """
-        split_csv_TET = {item[0]: item[1][self.feelings] for item in split_df_array}
-        df_TET_feelings_prin_dict = {name: df @ self.principal_components.T for name, df in split_csv_TET.items()}
+        if split_df_array == None:
+            df_TET_feelings_prin_dict = None
+        else:
+            split_csv_TET = {item[0]: item[1][self.feelings] for item in split_df_array}
+            df_TET_feelings_prin_dict = {name: df @ self.principal_components.T for name, df in split_csv_TET.items()}
 
-        for key, value in df_TET_feelings_prin_dict.items():
-            plt.figure()
-            plt.scatter(value.iloc[:, 0], value.iloc[:, 1], s=0.5)
-            plt.title(f'PCA Projection: {key}')
-            plt.xlabel('Principal Component 1')
-            plt.ylabel('Principal Component 2')
-            # plt.xlim(-6, 6)
-            # plt.ylim(-1, 2)
-            plt.tight_layout()
-            plt.savefig(os.path.join(self.savelocation, f'PCA_{key}.png'))
-            plt.close()
+            for key, value in df_TET_feelings_prin_dict.items():
+                plt.figure()
+                plt.scatter(value.iloc[:, 0], value.iloc[:, 1], s=0.5)
+                plt.title(f'PCA Projection: {key}')
+                plt.xlabel('Principal Component 1')
+                plt.ylabel('Principal Component 2')
+                # plt.xlim(-6, 6)
+                # plt.ylim(-1, 2)
+                plt.tight_layout()
+                plt.savefig(os.path.join(self.savelocation, f'PCA_{key}.png'))
+                plt.close()
 
         return df_TET_feelings_prin_dict
-# =============================================================================
-# Custom HMM Model using multivariate t–distribution 
-# =============================================================================
+
+# =============================================================================|
+# Custom HMM Model using multivariate t–distribution                           |
+# =============================================================================|
 class HMMModel:
     def __init__(self, num_states, num_emissions, data=None, random_seed=12345):
         self.num_states = num_states
@@ -227,22 +226,22 @@ class HMMModel:
             numerator = np.sum(gamma_vals * (np.log(w) - w))
             denominator = np.sum(gamma_vals * (psi((nu + d)/2) - np.log((nu + d)/2)))
             
-            if denominator == 0:
+            if abs(denominator) < 1e-12:
                 break
                 
             nu_new = nu - numerator/denominator
             if abs(nu_new - nu) < 1e-4:
                 break
-            nu = np.clip(nu_new, 2, 10)
+            nu = np.clip(nu_new, 2, 20)
             
         return nu
     
     @staticmethod
     def update_transition_probabilities(xi, num_states):
-        # regularized version:
-        state_persistence_prior = 5.0  # Higher values = stronger self-transition preference
-        trans_prob = np.sum(xi, axis=2) + np.eye(num_states) * state_persistence_prior
-        trans_prob += 1e-12  # Numerical stability
+        # Use a Dirichlet prior to encourage state persistence
+        prior_strength = 5.0  #Configurable hyperparameter
+        prior = np.eye(num_states) * prior_strength
+        trans_prob = np.sum(xi, axis=2) + prior  # Add prior instead of scaling
         trans_prob /= trans_prob.sum(axis=1, keepdims=True)
         return trans_prob
 
@@ -327,62 +326,69 @@ class HMMModel:
 
     def forward_backward(self, data):
         """
-        Execute the forward–backward algorithm and return alpha, beta, gamma and the log likelihood.
+        Forward-Backward algorithm in log-space to avoid numerical underflow.
+        Returns log_alpha, log_beta, gamma (state probabilities) and overall log-likelihood.
         """
         num_data = data.shape[0]
         num_states = self.num_states
-        emission_probs = self._compute_emission_probs(data)
+        log_emission_probs = np.log(self._compute_emission_probs(data) + 1e-12)
+        log_trans_prob = np.log(self.trans_prob + 1e-12)
 
-        alpha = np.zeros((num_data, num_states))
-        beta = np.zeros((num_data, num_states))
-        gamma_vals = np.zeros((num_data, num_states))
+        log_alpha = np.full((num_data, num_states), -np.inf)
+        log_beta = np.full((num_data, num_states), -np.inf)
 
-        alpha[0, :] = emission_probs[0, :] * (1 / num_states)
-        alpha[0, :] /= np.sum(alpha[0, :])
+        # Initialize log_alpha
+        log_alpha[0, :] = log_emission_probs[0, :] - np.log(num_states)
         for t in range(1, num_data):
-            alpha[t, :] = emission_probs[t, :] * (alpha[t - 1, :] @ self.trans_prob)
-            if np.sum(alpha[t, :]) > 0:
-                alpha[t, :] /= np.sum(alpha[t, :])
-
-        beta[-1, :] = 1
+            for j in range(num_states):
+                log_alpha[t, j] = log_emission_probs[t, j] + logsumexp(log_alpha[t - 1, :] + log_trans_prob[:, j])
+        
+        # Initialize log_beta
+        log_beta[-1, :] = 0  # log(1) = 0
         for t in range(num_data - 2, -1, -1):
-            beta[t, :] = self.trans_prob @ (beta[t + 1, :] * emission_probs[t + 1, :])
-            if np.sum(beta[t, :]) > 0:
-                beta[t, :] /= np.sum(beta[t, :])
-
-        gamma_vals = alpha * beta
-        gamma_vals /= gamma_vals.sum(axis=1, keepdims=True)
-        log_lik = np.sum(np.log(alpha.sum(axis=1) + 1e-12))
-        return alpha, beta, gamma_vals, log_lik
+            for j in range(num_states):
+                log_beta[t, j] = logsumexp(log_trans_prob[j, :] + log_emission_probs[t + 1, :] + log_beta[t + 1, :])
+        
+        # Calculate log-gamma (smoothed state probabilities)
+        log_gamma = log_alpha + log_beta
+        log_gamma -= logsumexp(log_gamma, axis=1, keepdims=True)
+        
+        # Overall log-likelihood can be computed from the alpha values.
+        log_lik = logsumexp(log_alpha[-1, :])
+        
+        return log_alpha, log_beta, np.exp(log_gamma), log_lik
 
     def decode(self, data):
         """
-        Viterbi decoding to obtain the most likely state sequence and log probability.
+        Viterbi algorithm in log-space.
+        Returns the most likely sequence of states.
         """
         num_data = data.shape[0]
         num_states = self.num_states
-        emission_probs = self._compute_emission_probs(data)
-        delta = np.zeros((num_data, num_states))
+        log_emission_probs = np.log(self._compute_emission_probs(data) + 1e-12)
+        log_trans_prob = np.log(self.trans_prob + 1e-12)
+
+        log_delta = np.full((num_data, num_states), -np.inf)
         psi = np.zeros((num_data, num_states), dtype=int)
 
-        delta[0, :] = emission_probs[0, :] * (1 / num_states)
-        delta[0, :] /= np.sum(delta[0, :])
-
+        log_delta[0, :] = log_emission_probs[0, :] - np.log(num_states)
         for t in range(1, num_data):
             for j in range(num_states):
-                prev_vals = delta[t - 1, :] * self.trans_prob[:, j]
-                max_idx = np.argmax(prev_vals)
-                delta[t, j] = prev_vals[max_idx] * emission_probs[t, j]
-                psi[t, j] = max_idx
-            if np.sum(delta[t, :]) > 0:
-                delta[t, :] /= np.sum(delta[t, :])
+                temp = log_delta[t - 1, :] + log_trans_prob[:, j]
+                psi[t, j] = np.argmax(temp)
+                log_delta[t, j] = log_emission_probs[t, j] + np.max(temp)
+        
+        # Termination step - Get the log probability of the best final state
+        log_prob = np.max(log_delta[-1, :])  # Log-probability of the best state sequence
+        last_state = np.argmax(log_delta[-1, :])  # Best final state
 
+        # Backtracking step
         state_seq = np.zeros(num_data, dtype=int)
-        state_seq[-1] = np.argmax(delta[-1, :])
+        state_seq[-1] = last_state
         for t in range(num_data - 2, -1, -1):
             state_seq[t] = psi[t + 1, state_seq[t + 1]]
-        log_prob = np.sum(np.log(np.max(delta, axis=1) + 1e-12))
-        return state_seq, log_prob
+        
+        return state_seq, log_prob 
 
     def train(self, data, num_iterations, num_states):
         """
@@ -407,9 +413,9 @@ class HMMModel:
             )
         return self.trans_prob, self.emission_means, self.emission_covs, self.nu
 
-# =============================================================================
-# Custom HMM Clustering using the Custom HMM Model
-# =============================================================================
+# =============================================================================|
+# Custom HMM Clustering using the Custom HMM Model                             |
+# =============================================================================|
 class CustomHMMClustering:
     def __init__(self, filelocation_TET, savelocation_TET, df_csv_file_original, feelings, principal_components, no_of_jumps):
         self.filelocation_TET = filelocation_TET
@@ -418,24 +424,44 @@ class CustomHMMClustering:
         self.feelings = feelings
         self.principal_components = principal_components
         self.no_of_jumps = no_of_jumps
+        self.has_week = 'Week' in df_csv_file_original.columns  # Check if 'Week' exists
 
     def preprocess_data(self):
-        # Group the data by Subject, Week and Session then skip rows according to no_of_jumps.
+        # Determine grouping keys based on presence of 'Week'
+        group_keys = ['Subject', 'Week', 'Session'] if self.has_week else ['Subject', 'Session']
+        
         split_dict_skip = {}
-        for (subject, week, session), group in self.df_csv_file_original.groupby(['Subject', 'Week', 'Session']):
+        for keys, group in self.df_csv_file_original.groupby(group_keys):
             group = group.iloc[::self.no_of_jumps].copy()
-            split_dict_skip[(subject, week, session)] = group
+            split_dict_skip[keys] = group
 
         self.df_csv_file = pd.concat(split_dict_skip.values())
 
-        # Create a dictionary grouping by Subject, Week and Session again.
         split_dict = {}
-        for (subject, week, session), group in self.df_csv_file.groupby(['Subject', 'Week', 'Session']):
-            split_dict[(subject, week, session)] = group.copy()
+        for keys, group in self.df_csv_file.groupby(group_keys):
+            split_dict[keys] = group.copy()
 
-        # Concatenate the groups (dropping the last row from each group if needed).
         self.array = pd.concat([df[:-1] for df in split_dict.values()])
         self.array['number'] = range(self.array.shape[0])
+
+    def _align_states(self, ref_model, target_model, num_states):
+        # Hungarian algorithm to match states by emission means
+        cost_matrix = np.zeros((num_states, num_states))
+        for i in range(num_states):
+            for j in range(num_states):
+                cost_matrix[i, j] = np.linalg.norm(
+                    ref_model.emission_means[i] - target_model.emission_means[j]
+                )
+        row_ind, col_ind = linear_sum_assignment(cost_matrix)
+        return col_ind  # Maps target states to reference indices
+
+    def _permute_states(self, model, permutation):
+        # Reorder model parameters to match reference
+        model.emission_means = model.emission_means[permutation]
+        model.emission_covs = model.emission_covs[permutation]
+        model.trans_prob = model.trans_prob[permutation][:, permutation]
+        model.nu = model.nu[permutation]
+        return model
 
     def perform_clustering(self, num_states, num_iterations, num_repetitions):
         """
@@ -443,7 +469,7 @@ class CustomHMMClustering:
         and then average the resulting outputs to obtain final parameters and state sequences.
         """
         num_emissions = len(self.feelings)
-        data = self.array.iloc[:, 4:4+len(self.feelings)].values
+        data = self.array[self.feelings].values
         
         # Z-score normalization
         self.mean = np.mean(data, axis=0)
@@ -478,6 +504,13 @@ class CustomHMMClustering:
             # Obtain forward-backward results.
             _, _, fs, log_lik = model.forward_backward(data_normalized)
             
+            # Align states to reference (first repetition)
+            if rep == 0:
+                reference_model = model
+            else:
+                alignment = self._align_states(reference_model, model, num_states)
+                model = self._permute_states(model, alignment)
+                
             # Optionally print shapes to verify.
             print(f"Transition probabilities shape: {model.trans_prob.shape}")
             print(f"Emission means shape: {model.emission_means.shape}")
@@ -607,67 +640,46 @@ class CustomHMMClustering:
         with open( self.savelocation_TET+'cluster_summary.txt', 'w') as f:
             f.write("\n".join(summary))
 
-    def analyze_transitions(self, num_states):
-        """
-        Analyze transitions per group (Subject, Week, Session) using dynamic thresholding.
-        Each transition tuple: (transition_start, transition_end, from_state, to_state)
-        """
-        self.group_transitions = {}  # dictionary to store transitions per group
+    def analyze_transitions(self, num_states, abrupt_gamma_threshold=0.7):
+        group_keys = ['Subject', 'Week', 'Session'] if self.has_week else ['Subject', 'Session']
+        self.group_transitions = {}
 
-        # Loop over each group (Subject, Week, Session)
-        for heading, group in self.array.groupby(['Subject', 'Week', 'Session']):
+        for heading, group in self.array.groupby(group_keys):
             group_labels = group['labels'].values
-            
-            # Determine which columns to use for features.
-            # If self.avg_fs is a DataFrame, use its columns; otherwise, assume self.avg_fs is a NumPy array
-            # and use self.feelings as the feature names.
-            if hasattr(self.avg_fs, 'columns'):
-                fs_columns = self.avg_fs.columns
-            else:
-                fs_columns = self.feelings  # adjust this if your features are stored differently
-
-            # Extract the feature matrix for this group.
-            group_fs = group[fs_columns].values
-            
-            # Calculate the dynamic threshold for this group.
-            threshold = self.calculate_dynamic_threshold(group[fs_columns])
-            min_state_duration = 5  # adjust as needed
+            group_fs = group[self.feelings].values  # Ensure this is the gamma values from the HMM
+            threshold = self.calculate_dynamic_threshold(group[self.feelings])
+            min_state_duration = 5
 
             transitions = []
-            # Use segment_start to mark the beginning of the current state segment.
             segment_start = 0
 
-            # Iterate over the state sequence for this group, starting at the second element.
             for i in range(1, len(group_labels)):
-                # Check if the state changed between the previous index and the current one.
                 if group_labels[i] != group_labels[i - 1]:
-                    # Only consider the transition if the current segment is long enough.
                     if i - segment_start >= min_state_duration:
-                        # new_state is the state we transitioned into.
                         new_state = group_labels[i]
-                        # Set initial boundaries: the change occurs between i-1 and i.
-                        transition_start = i - 1  # Last index of the old state.
-                        transition_end = i        # First index of the new state.
+                        transition_start = i - 1
+                        transition_end = i
 
-                        # Adjust the start boundary: look backward as long as the difference is significant.
+                        # Expand transition start backward
                         while (transition_start > segment_start and
                             np.abs(group_fs[transition_start, new_state] - group_fs[transition_start - 1, new_state]) > threshold / 2):
                             transition_start -= 1
 
-                        # Adjust the end boundary: look forward as long as the difference remains significant.
+                        # Expand transition end forward
                         while (transition_end < len(group_labels) - 1 and
                             np.abs(group_fs[transition_end, new_state] - group_fs[transition_end + 1, new_state]) > threshold / 2):
                             transition_end += 1
 
-                        # Append the transition tuple: (start index, end index, from_state, to_state)
-                        transitions.append((transition_start, transition_end, group_labels[i - 1], new_state))
+                        # Calculate max gamma for the new state in the transition window
+                        max_gamma = np.max(group_fs[transition_start:transition_end + 1, new_state])
+                        transition_label = "abrupt" if max_gamma >= abrupt_gamma_threshold else "gradual"
 
-                    # Update the segment_start to the current index for the next segment.
+                        transitions.append((transition_start, transition_end, group_labels[i - 1], new_state, transition_label))
+
                     segment_start = i
 
-            # Save the transitions for this group.
             self.group_transitions[heading] = transitions
-
+    
     def calculate_dynamic_threshold(self, avg_fs):
         # Compute absolute changes in state probabilities
         changes = np.abs(np.diff(avg_fs, axis=0))
@@ -688,11 +700,12 @@ class CustomHMMClustering:
         self._plot_cluster_features()
         self._create_cluster_summary()
         self.analyze_transitions(num_states)
+
         return self.array, self.dictionary_clust_labels , self.group_transitions
 
-# =============================================================================
-# Visualiser Class for Trajectory Plotting
-# =============================================================================
+# =============================================================================|
+# Visualiser Class for Trajectory Plotting                                     |
+# =============================================================================|
 class Visualiser:
     def __init__(self, filelocation_TET, savelocation_TET, array, df_csv_file_original,
                  dictionary_clust_labels, principal_components, feelings, no_of_jumps, colours, transitions):
@@ -705,99 +718,197 @@ class Visualiser:
         self.feelings = feelings
         self.no_of_jumps = no_of_jumps
         self.color_map = colours
-        self.group_transitions = transitions  
+        self.group_transitions = transitions 
+        self.feeling_colors = {feeling: self.color_map.get(i, 'black') 
+                  for i, feeling in enumerate(self.feelings)}
+        self.has_week = 'Week' in df_csv_file_original.columns
 
     def preprocess_data(self):
-        """
-        Project feelings data onto the principal components and group the data by Subject, Week, and Session.
-        """
-        self.array[["principal component 1 non-diff", "principal component 2 non-diff"]] = \
-            self.array[self.feelings].dot(self.principal_components.T)
-            
+        group_keys = ['Subject', 'Week', 'Session'] if self.has_week else ['Subject', 'Session']
         self.traj_transitions_dict = {}
         self.traj_transitions_dict_original = {}
-        
-        for heading, group in self.df_csv_file_original.groupby(['Subject', 'Week', 'Session']):
+                
+        for heading, group in self.df_csv_file_original.groupby(group_keys):
             self.traj_transitions_dict_original[heading] = group
-        for heading, group in self.array.groupby(['Subject', 'Week', 'Session']):
+        for heading, group in self.array.groupby(group_keys):
             self.traj_transitions_dict[heading] = group
 
+    def annotate_state_durations(self, ax, time_array, transitions):
+        """Add duration labels and transition markers to plot"""
+        for (start_idx, end_idx, from_state, to_state, trans_type) in transitions:
+            start_time = time_array[start_idx]
+            end_time = time_array[end_idx]
+            duration = end_time - start_time
+
+            # Annotation
+            ax.text((start_time + end_time)/2, ax.get_ylim()[1]*0.9,
+                    f"{duration:.1f}s", ha='center', va='top', 
+                    fontsize=8, color='black')
+            
+            # Transition markers
+            ax.axvline(x=start_time, color='black', linestyle='--', 
+                      alpha=0.5, linewidth=1)
+            ax.axvline(x=end_time, color='black', linestyle='--', 
+                      alpha=0.5, linewidth=1)
+            
+            # State change label
+            ax.text(end_time, ax.get_ylim()[1]*0.90, 
+                   f"{from_state+1} → {to_state+1}",
+                   ha='left', va='top', fontsize=8, color='black')
+
+    def annotate_conditions(self, ax, time_array, df):
+        """Add breathwork condition labels"""
+        prev_condition = df['Condition'].iloc[0]
+        start_time = time_array[0]
+
+        for idx, (t, condition) in enumerate(zip(time_array, df['Condition'])):
+            if condition != prev_condition or idx == len(time_array)-1:
+                end_time = t
+                ax.text((start_time + end_time)/2, ax.get_ylim()[1]*0.95,
+                        prev_condition, ha='center', va='top', 
+                        fontsize=6, color='black')
+                start_time = t
+                prev_condition = condition
+
     def plot_trajectories(self):
-        """
-        For each subject/group trajectory, plot the time series for each feeling and overlay:
-        - Cluster-based shading (if available)
-        - Vertical dashed lines indicating the start and end of transitions
-        - Text annotations showing the state change (from_state → to_state)
-        """
-        time_jump = 28  # as in the original implementation
+        """Main plotting function with transition visualization"""
+        time_jump = 28  # Original data sampling interval (seconds)
 
         for heading, value in self.traj_transitions_dict_original.items():
-            plt.figure()
-            
-            # Build the time axis for this group.
-            starting_time = 0
-            time_array = np.arange(starting_time, starting_time + time_jump * value.shape[0], time_jump)
-            
-            # Plot each feeling’s time series (scaled as needed).
+            fig, ax = plt.subplots()
+            time_array = np.arange(0, time_jump*value.shape[0], time_jump)
+
+            # Plot feeling trajectories
             for feeling in self.feelings:
-                plt.plot(time_array, value[feeling] * 10, label=feeling)
-            
-            # Clean up the title from the heading tuple.
-            combined = ''.join(map(str, heading))
-            cleaned = combined.replace("\\", "").replace("'", "").replace(" ", "").replace("(", "").replace(")", "")
-            plt.title(cleaned)
-            plt.xlabel('Time/s')
-            plt.ylabel('Rating')
-            plt.tight_layout()
-            
-            # --- Cluster-based shading (if applicable) ---
+                ax.plot(time_array, value[feeling]*10, 
+                       label=feeling, color=self.feeling_colors[feeling])
+
+            # Add cluster shading
             if heading in self.traj_transitions_dict:
                 traj_group = self.traj_transitions_dict[heading]
                 prev_color_val = traj_group['labels'].iloc[0]
                 start_index = 0
                 for index, color_val in enumerate(traj_group['labels']):
-                    if color_val != prev_color_val or index == traj_group.shape[0] - 1:
-                        if index != traj_group.shape[0] - 1:
-                            end_index = index * (time_jump * self.no_of_jumps)
-                        else:
-                            end_index = time_array[-1]
-                        plt.axvspan(start_index * (time_jump * self.no_of_jumps), end_index,
-                                    facecolor=self.color_map.get(prev_color_val, 'grey'), alpha=0.3)
+                    if color_val != prev_color_val or index == traj_group.shape[0]-1:
+                        end_idx = index if index != traj_group.shape[0]-1 else len(time_array)-1
+                        ax.axvspan(time_array[start_index], time_array[end_idx],
+                                  facecolor=self.color_map.get(prev_color_val, 'grey'), alpha=0.3)
                         start_index = index
                         prev_color_val = color_val
-            
-            # --- Transition markers with labels (per group) ---
+
+            # Add annotations
             if heading in self.group_transitions:
-                for (start_idx, end_idx, from_state, to_state) in self.group_transitions[heading]:
-                    start_time = start_idx * (time_jump * self.no_of_jumps)
-                    end_time = end_idx * (time_jump * self.no_of_jumps)
-                    plt.axvline(x=start_time, color='black', linestyle='--', alpha=0.5, linewidth=1)
-                    plt.axvline(x=end_time, color='black', linestyle='--', alpha=0.5, linewidth=1)
-                    # Calculate mid-point for the annotation.
-                    mid_time = (start_time + end_time) / 2
-                    # Position the text near the top of the plot.
-                    y_pos = plt.ylim()[1] * 0.95
-                    plt.text(mid_time, y_pos, f'State {from_state+1} → {to_state+1}', 
-                            horizontalalignment='center', verticalalignment='top', fontsize=8, color='black')
-                    # Optionally, uncomment the next line to add a shaded region between markers.
-                    # plt.axvspan(start_time, end_time, facecolor='gray', alpha=0.2)
+                self.annotate_state_durations(ax, time_array, 
+                                             self.group_transitions[heading])
+            if 'Condition' in value.columns:
+                self.annotate_conditions(ax, time_array, value)
+
+            # Finalize plot
+            combined = ''.join(map(str, heading)).translate(
+                {ord(c): None for c in "\\'() "})
+            ax.set_title(combined)
+            ax.set_xlabel('Time (s)')
+            ax.set_ylabel('Rating')
             
-            # --- Legend ---
+            # Create legend
             cluster_patches = [mpatches.Patch(color=color, label=f'Cluster {cluster}')
-                            for cluster, color in self.color_map.items()]
-            handles, labels = plt.gca().get_legend_handles_labels()
+                             for cluster, color in self.color_map.items()]
+            handles, labels = ax.get_legend_handles_labels()
             handles.extend(cluster_patches)
-            labels.extend([f'Cluster {label}' for label in self.dictionary_clust_labels.values()])
-            plt.legend(handles=handles, labels=labels, title='Legend', bbox_to_anchor=(1.05, 1), loc='upper left')
-            
-            # --- Save the figure ---
-            save_path = os.path.join(self.savelocation_TET, f'HMM_stable_cluster_centroids{cleaned}.png')
+            labels.extend([f'Cluster {label}' 
+                         for label in self.dictionary_clust_labels.values()])
+            ax.legend(handles=handles, labels=labels, title='Legend',
+                     bbox_to_anchor=(1.05, 1), loc='upper left')
+
+            # Save plot
+            save_path = os.path.join(self.savelocation_TET, 
+                                    f'HMM_stable_cluster_centroids{combined}.png')
             plt.savefig(save_path, bbox_inches='tight')
-            plt.close()
+            plt.close(fig)
+
+    def save_transitions_to_file(self):
+        """Save transition metadata to CSV file with per-transition condition frequencies"""
+        transitions_list = []
+        time_step = 28 * self.no_of_jumps  # Seconds between data points
+        window_size = 2
+        possible_conditions = self.df_csv_file_original['Condition'].unique()
+
+        for group_key, transitions in self.group_transitions.items():
+            if self.has_week:
+                subject, week, session = group_key
+            else:
+                subject, session = group_key
+                week = None
+
+            original_group = self.traj_transitions_dict_original.get(group_key, pd.DataFrame())
+            if original_group.empty or 'Condition' not in original_group.columns:
+                continue
+
+            for transition in transitions:
+                start_idx, end_idx, from_state, to_state, trans_type = transition
+                start_time = start_idx * time_step
+                end_time = (end_idx + 1) * time_step
+                duration = end_time - start_time
+
+                # Convert to original data indices
+                original_start_idx = max(0, int(start_time // 28))
+                original_end_idx = min(len(original_group)-1, int(end_time // 28))
+
+                # Extract conditions in each region
+                before_start = max(0, original_start_idx - window_size)
+                before_end = original_start_idx - 1
+                before_conditions = original_group.iloc[before_start:before_end+1]['Condition'] if before_end >= before_start else pd.Series()
+
+                during_conditions = original_group.iloc[original_start_idx:original_end_idx+1]['Condition']
+
+                after_start = original_end_idx + 1
+                after_end = min(len(original_group)-1, original_end_idx + window_size)
+                after_conditions = original_group.iloc[after_start:after_end+1]['Condition'] if after_end >= after_start else pd.Series()
+
+                # Calculate frequencies for each condition in each period
+                def get_freq(conditions):
+                    counts = conditions.value_counts(normalize=True).to_dict()
+                    return {cond: counts.get(cond, 0.0) for cond in possible_conditions}
+
+                before_freq = get_freq(before_conditions)
+                during_freq = get_freq(during_conditions)
+                after_freq = get_freq(after_conditions)
+
+                # Build transition entry with condition frequencies
+                transition_entry = {
+                    'Subject': subject,
+                    'Week': week,
+                    'Session': session,
+                    'Start Time (s)': start_time,
+                    'End Time (s)': end_time,
+                    'Duration (s)': duration,
+                    'From State': from_state + 1,
+                    'To State': to_state + 1,
+                    'Transition Type': trans_type,
+                }
+
+                # Add condition frequency columns
+                for cond in possible_conditions:
+                    transition_entry[f'Before {cond} Freq'] = before_freq.get(cond, 0.0)
+                    transition_entry[f'During {cond} Freq'] = during_freq.get(cond, 0.0)
+                    transition_entry[f'After {cond} Freq'] = after_freq.get(cond, 0.0)
+
+                transitions_list.append(transition_entry)
+
+        # Save to CSV
+        if transitions_list:
+            df_transitions = pd.DataFrame(transitions_list)
+            save_path = os.path.join(self.savelocation_TET, 'transitions_summary.csv')
+            df_transitions.to_csv(save_path, index=False)
+        else:
+            print("No transitions detected for saving")
+
 
     def run(self):
+        """Execute full visualization pipeline"""
         self.preprocess_data()
-        self.plot_trajectories()
+        self.plot_trajectories()       
+        self.save_transitions_to_file()
 
 # ==================================================================================|
 # Jump Analysis Class (using raw feelings rather than differences like in k-means)  |
@@ -827,7 +938,7 @@ class HMMJumpAnalysis:
         for jump in tqdm(range(1, 15), desc="Evaluating Jumps"):
             # Train with current jump
             cluster = CustomHMMClustering(..., no_of_jumps=jump)
-            cluster.run(num_states=3, num_iterations=30)
+            cluster.run(num_states=self.num_states, num_iterations=self.num_iterations)
             
             # Calculate stability (ratio of dominant cluster)
             counts = np.bincount(cluster.array['labels'])
@@ -906,7 +1017,6 @@ class HMMJumpAnalysis:
         save_path = os.path.join(self.savelocation_TET, f'HMM_stable_cluster_dominance_jump.png')
         plt.savefig(save_path)
         
-
     def determine_no_jumps_consistency(self):
         """
         For each jump value, this method measures the consistency of the HMM clustering.
@@ -992,7 +1102,6 @@ class HMMJumpAnalysis:
         save_path = os.path.join(self.savelocation_TET, f'HMM_consistency_plot.png')
         plt.savefig(save_path)
         
-
     def determine_no_of_jumps_autocorrelation(self):
         """
         Compute the average autocorrelation function (ACF) for each feeling across all subjects,
@@ -1027,3 +1136,4 @@ class HMMJumpAnalysis:
         plt.tight_layout()
         save_path = os.path.join(self.savelocation_TET, f'HMM_autocorrelation.png')
         plt.savefig(save_path)
+
