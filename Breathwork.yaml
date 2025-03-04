@@ -36,9 +36,9 @@ feelings_diffs:
   - SpiritualExperience_diff  # Vectorised version of the feelings columns.
 
 no_dimensions_PCA: 2  # Number of dimensions to run the PCA on.
-no_clust: 4  # Number of vectoral clusters, note total clusters will be one greater as the stable cluster is split into 2.
+no_clust: 2  # Number of vectoral clusters, note total clusters will be one greater as the stable cluster is split into 2.
 no_of_jumps: 1  # Number of timestep jumps in the TET to form the vectors.
-no_states: 4 # Optimal number of states
+no_states: 2 # Optimal number of states
 
 headers:
   Subject: 0
@@ -100,3 +100,4 @@ colours_list:
   - olive
 
 header: 'Week'
+
