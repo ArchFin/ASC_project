@@ -2,7 +2,7 @@ from sklearn.cluster import KMeans
 from itertools import combinations
 import pandas as pd
 from scipy.spatial import distance
-import os
+import os  # Added for path handling
 from sklearn.decomposition import PCA
 import matplotlib.pyplot as plt
 import numpy as np
@@ -14,134 +14,142 @@ import matplotlib.patches as mpatches
 from statsmodels.tsa.stattools import acf
 import yaml
 from scipy.spatial.distance import euclidean
+from sklearn.preprocessing import StandardScaler  # Added for standardization
 
-
-# Load YAML file
+# =============================================================================|
+# Configuration via YAML                                                       |
+# =============================================================================|
 with open("Breathwork.yaml", "r") as file:
     config = yaml.safe_load(file)  # Converts YAML to a Python dictionary
 
-# Class to handle CSV file operations
+# =============================================================================|
+# CSV File Handling                                                            |
+# =============================================================================|
 class csv_splitter:
-
     def __init__(self, file_path):
         """
-        Constructor to initialize the CSV file location.
-        :param excel_file_name: Name of the CSV file to be processed.
+        Constructor to initialise the CSV file location.
         """
         self.file_path = file_path
 
     def read_CSV(self):
         """
         Reads the CSV file and returns it as a pandas DataFrame.
-        :return: DataFrame containing CSV file data.
         """
         try:
-            df_CSV_file_name = pd.read_csv(self.file_path)  # Load CSV into DataFrame
-            return df_CSV_file_name  # Return the DataFrame
-        
+            df = pd.read_csv(self.file_path)
+            return df
         except Exception as e:
-            print(f"Error reading Excel file: {e}")  # Print error if file reading fails
+            print(f"Error reading CSV file: {e}")
+            return None
 
-    def split_by_header(self, df_CSV_file_name, heading):
+    def split_by_header(self, df, heading):
         """
-        Splits the DataFrame into multiple DataFrames based on unique values in a specified column.
-        :param df_CSV_file_name: The DataFrame to be split.
-        :param heading: Column name used to split the DataFrame.
-        :return: Dictionary of DataFrames and an array containing key-value pairs.
+        Splits the DataFrame into multiple DataFrames based on unique values in the specified column.
+        Returns a dictionary and a list of key-value pairs.
         """
-        # Check if the specified heading exists in the DataFrame
-        if heading not in df_CSV_file_name.columns:
-            print(f"Error: '{heading}' not found in DataFrame columns.")  # Print error if column is missing
-            return None  # Return None to indicate failure
+        if heading not in df.columns:
+            print(f"Error: '{heading}' not found in DataFrame columns.")
+            return None, None
 
-        # Get unique values from the specified column
-        heading_values = df_CSV_file_name[heading].unique()
-
-        # Create a dictionary where keys are unique values, and values are corresponding filtered DataFrames
-        split_df = {value: df_CSV_file_name[df_CSV_file_name[heading] == value] for value in heading_values}
-
-        # Convert dictionary into an array format with key-value pairs
+        split_df = {value: df[df[heading] == value] for value in df[heading].unique()}
         split_df_array = [[key, value] for key, value in split_df.items()]
-
-        return split_df, split_df_array  # Return both dictionary and array of split DataFrames
-    
+        return split_df, split_df_array
+           
 # Finds and plots the principal components for all of the TET data
 
+# =============================================================================|
+# Principal Component Finder                                                   |
+# =============================================================================|
 class principal_component_finder:
-
     def __init__(self, csv_file, feelings, no_dimensions, savelocation_TET):
-        # Extracts relevant data from the CSV file based on given feelings
+        """
+        Extracts the required features (feelings) and performs PCA.
+        """
         self.csv_file_TET = csv_file[feelings]
         self.feelings = feelings
-        # Computes the correlation matrix of the selected data
-        corr_matrix = self.csv_file_TET.corr()
+        self.savelocation = savelocation_TET
+        self.no_dimensions = no_dimensions
+        
+        # Standardize the data
+        scaler = StandardScaler()
+        self.scaled_data = scaler.fit_transform(self.csv_file_TET)
 
-        self.savelocation  = savelocation_TET
-        
-        # Performs PCA on the correlation matrix with the specified number of dimensions
+        # Compute PCA
         pca = PCA(n_components=no_dimensions)
-        self.principal_components = pca.fit_transform(corr_matrix)
+        self.principal_components = pca.fit(self.scaled_data).components_
         self.explained_variance_ratio = pca.explained_variance_ratio_
-    
+
     def PCA_TOT(self):
-        # Computes the transformed data in PCA space
-        df_TET_feelings_prin = self.csv_file_TET.dot(self.principal_components)
-        
-        # Plots bar charts for each principal component
-        for i in range(0, self.principal_components.shape[1]):
-            y_values = []
-            for j in range(0, len(self.feelings)):
-                y_values.append(self.principal_components[j][i])
-            
+        """
+        Projects the data onto the principal components and plots bar charts for each component.
+        Returns the principal components, explained variance ratio, and the transformed data.
+        """
+
+        # Project STANDARDIZED DATA 
+        df_TET_feelings_prin = pd.DataFrame(self.scaled_data @ self.principal_components.T,  # <-- KEY FIX
+                                            columns=[f"PC{i+1}" for i in range(self.no_dimensions)])
+
+        # Plot bar charts for each principal component.
+        for i in range(self.principal_components.shape[0]):
             plt.figure()
-            plt.bar(self.feelings, y_values)
+            plt.bar(self.feelings, self.principal_components[i])
             plt.title(f'Principal Component {i+1}')
             plt.xticks(rotation=45, ha='right')
             plt.tight_layout()
-            plt.savefig(self.savelocation+ f'/principal_component{i+1}')
-        
-        # Scatter plot of the first two principal components
+            plt.savefig(os.path.join(self.savelocation, f'principal_component{i+1}.png'))
+            plt.close()
+
+        # Scatter plot of the first two principal components.
         plt.figure()
-        plt.scatter(df_TET_feelings_prin[0], df_TET_feelings_prin[1], s=0.5)
+        plt.scatter(df_TET_feelings_prin.iloc[:, 0], df_TET_feelings_prin.iloc[:, 1], s=0.5)
         plt.xlabel('Principal Component 1')
         plt.ylabel('Principal Component 2')
-        plt.title('Plot of all the data points in PCA space')
-        plt.xlim(-6, 6)
-        plt.ylim(-1, 2)
-        
-        # Bar chart showing the explained variance ratio of each principal component
-        labels = [f'Principal Component {i+1}' for i in range(self.principal_components.shape[1])]
+        plt.title('PCA Projection')
+        # plt.xlim(-6, 6)
+        # plt.ylim(-1, 2)
+        plt.tight_layout()
+        plt.savefig(os.path.join(self.savelocation, 'all_data_in_PCA.png'))
+        plt.close()
+
+        # Bar chart for explained variance ratio.
+        labels = [f'Principal Component {i+1}' for i in range(len(self.explained_variance_ratio))]
         plt.figure(figsize=(10, 6))
         plt.bar(labels, self.explained_variance_ratio, color='skyblue')
-
-        # Adding title and labels
-        plt.title('Explained Variance Ratio of PCA Components')
+        plt.title('Explained Variance Ratio')
         plt.xlabel('Principal Components')
-        plt.ylabel('Explained Variance Ratio')
-        plt.xticks(rotation=45)  # Rotates labels to prevent overlap
-        plt.tight_layout()    
-        
+        plt.ylabel('Variance Explained')
+        plt.xticks(rotation=45)
+        plt.tight_layout()
+        plt.savefig(os.path.join(self.savelocation, 'explained_variance_ratio.png'))
+        plt.close()
+
         return self.principal_components, self.explained_variance_ratio, df_TET_feelings_prin
-    
+
+
     def PCA_split(self, split_df_array):
-        # Extracts relevant data for each split dataset
-        split_df_array_TET = [[split_df_array[i][0], split_df_array[i][1][self.feelings]] for i in range(0, len(split_df_array))]
-        split_csv_TET = {split_df_array_TET[i][0]: split_df_array_TET[i][1] for i in range(0, len(split_df_array))}
-        
-        # Computes the transformed data for each split dataset
-        df_TET_feelings_prin_dict = {name: split_csv_TET[name].dot(self.principal_components) for name in split_csv_TET.keys()}
-        
-        # Plots scatter plots for each split dataset in PCA space
-        for key, value in df_TET_feelings_prin_dict.items():
-            plt.figure()
-            plt.scatter(value[0], value[1], s=0.5)
-            plt.title(key)
-            plt.xlabel('Principal Component 1 (bored/effort)')
-            plt.ylabel('Principal Component 2 (calm)')
-            plt.xlim(-6, 6)
-            plt.ylim(-1, 2)
-            plt.show()
-        
+        """
+        Projects each split dataset onto the principal components and plots scatter plots.
+        Returns a dictionary mapping split names to their PCA-transformed data.
+        """
+        if split_df_array == None:
+            df_TET_feelings_prin_dict = None
+        else:
+            split_csv_TET = {item[0]: item[1][self.feelings] for item in split_df_array}
+            df_TET_feelings_prin_dict = {name: df @ self.principal_components.T for name, df in split_csv_TET.items()}
+
+            for key, value in df_TET_feelings_prin_dict.items():
+                plt.figure()
+                plt.scatter(value.iloc[:, 0], value.iloc[:, 1], s=0.5)
+                plt.title(f'PCA Projection: {key}')
+                plt.xlabel('Principal Component 1')
+                plt.ylabel('Principal Component 2')
+                # plt.xlim(-6, 6)
+                # plt.ylim(-1, 2)
+                plt.tight_layout()
+                plt.savefig(os.path.join(self.savelocation, f'PCA_{key}.png'))
+                plt.close()
+
         return df_TET_feelings_prin_dict
 
 import pandas as pd
@@ -232,7 +240,7 @@ class KMeansVectorClustering:
         Generate a scatter plot of clustered data using principal components.
         """
         # Project data onto principal components
-        self.differences_array[["principal component 1", "principal component 2"]] = self.differences_array.iloc[:, -len(self.feelings):].dot(self.principal_components)
+        self.differences_array[["principal component 1", "principal component 2"]] = self.differences_array.iloc[:, -len(self.feelings):].dot(self.principal_components.T)
 
         # Scatter plot of clustered points
         plt.scatter(self.differences_array["principal component 1"], self.differences_array["principal component 2"], color=self.point_colours, s=0.5)
@@ -241,10 +249,10 @@ class KMeansVectorClustering:
         plt.title("K-Means Cluster Scatter Plot")
         plt.tight_layout()
         plt.savefig(self.savelocation_TET + 'K_means_vector_scatter_plot')
-        plt.show()
+        plt.close()
 
         # Plot cluster centres as vectors
-        cluster_centres_prin = np.transpose(self.cluster_centres_fin.dot(self.principal_components), (1, 0))
+        cluster_centres_prin = np.transpose(self.cluster_centres_fin.dot(self.principal_components.T), (1, 0))
         for i in range(cluster_centres_prin.shape[1]):
             plt.arrow(0, 0, cluster_centres_prin[0, i], cluster_centres_prin[1, i], head_width=0.1, head_length=0.1, fc=self.colours_list[i], ec=self.colours_list[i])
         
@@ -256,7 +264,7 @@ class KMeansVectorClustering:
         plt.ylim(-1.2, 1.2)
         plt.tight_layout()
         plt.savefig(self.savelocation_TET + 'cluster_centres_for_kmeans_vectors')
-        plt.show()
+        plt.close()
 
     def plot_cluster_centroids(self):
         """
@@ -270,7 +278,7 @@ class KMeansVectorClustering:
             plt.title(f"Cluster Centroid for Cluster {i+1}")
             plt.tight_layout()
             plt.savefig(self.savelocation_TET + f'K-Vector_Vector_Cluster_Centroids_{i}')
-            plt.show()
+            plt.close()
 
     def stable_cluster_analysis(self):
         """
@@ -317,7 +325,7 @@ class KMeansVectorClustering:
             plt.title(f"Cluster Centroid for Stable Cluster {stable_cluster+1}{alphabet[i]}")
             plt.tight_layout()
             plt.savefig(self.savelocation_TET + f'K-Vector_Cluster_Centroids_for_stable_cluster_{i}')
-            plt.show()
+            plt.close()
 
     def run(self):
         """
@@ -342,8 +350,9 @@ class KMeansVectorVisualizer:
         self.principal_components = principal_components
         self.feelings = feelings
         self.no_of_jumps = no_of_jumps
-        
-        # Define a color map for different clusters
+        # 1 is 2a, 3 is 2b, 0 is 1 and 2 is 3 this is for clust and clust_name
+        # Negative Stable Cluster (green 2b), then Positive Vectoral cluster (blue 1) and Positive Stable (yellow 2a), and ends with Negative Vectoral cluster (red 3).
+        # Define a color map for different clusters s18week_1run_01
         self.color_map = {
             0: 'red',
             1: 'green',
@@ -353,7 +362,7 @@ class KMeansVectorVisualizer:
 
     def preprocess_data(self):
         # Compute principal component projections for the differences array
-        self.differences_array[["principal component 1 non-diff", "principal component 2 non-diff"]] = self.differences_array[self.feelings].dot(self.principal_components)
+        self.differences_array[["principal component 1 non-diff", "principal component 2 non-diff"]] = self.differences_array[self.feelings].dot(self.principal_components.T)
         
         # Initialize dictionaries to store trajectory data
         self.traj_transitions_dict = {}
@@ -416,7 +425,7 @@ class KMeansVectorVisualizer:
             
             # Save the plot
             plt.savefig(self.savelocation_TET + f'K_Vector_stable_cluster_centroids{cleaned}')
-            plt.show()
+            plt.close()
     
     def run(self):
         # Run the preprocessing and visualization methods
@@ -496,7 +505,7 @@ class JumpAnalysis:
         plt.xlabel('Number of Time Jumps')
         plt.ylabel('No in stable cluster:No in all other clusters')
         plt.savefig(self.savelocation_TET + f'KMeans_stable_cluster_dominance')  # Save the plot
-        plt.show()  # Show the plot
+        # plt.show()  # Show the plot
 
     # Method to analyse consistency of clusters based on the number of time steps
     def determine_no_jumps_consistency(self):
@@ -596,7 +605,7 @@ class JumpAnalysis:
         plt.xlabel('Number of Time Steps')
         plt.ylabel('Correct Assignment Ratio')
         plt.savefig(self.savelocation_TET + f'K_Vector_Cluster_Vectoral_consistency')  # Save the plot
-        plt.show()  # Show the plot
+        # plt.show()  # Show the plot
 
     # Method to analyse the autocorrelation of feelings over time
     def determine_no_of_jumps_autocorrelation(self):
@@ -630,4 +639,4 @@ class JumpAnalysis:
         plt.grid(True)  # Show grid
         plt.tight_layout()  # Ensure tight layout for the plot
         plt.savefig(self.savelocation_TET + f'K-Vector autocorrelation for each feeling')  # Save the plot
-        plt.show()  # Show the plot
+        # plt.show()  # Show the plot

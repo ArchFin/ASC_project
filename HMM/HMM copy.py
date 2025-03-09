@@ -47,6 +47,7 @@ clustering = CustomHMMClustering(config['filelocation_TET'], config['savelocatio
                                     df_csv_file_original, feelings, principal_components, no_of_jumps)
 
 results_array, dictionary_clust_labels, transitions = clustering.run(num_states=2, num_iterations=50, num_repetitions=50)
+results_array.to_csv("/Users/a_fin/Desktop/Year 4/Project/Data/HMM_output.csv", index=False)
 
 # Instantiate and run the visualiser.
 visualiser_instance = Visualiser(

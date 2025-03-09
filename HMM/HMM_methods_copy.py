@@ -131,7 +131,6 @@ class principal_component_finder:
 
         return self.principal_components, self.explained_variance_ratio, df_TET_feelings_prin
 
-
     def PCA_split(self, split_df_array):
         """
         Projects each split dataset onto the principal components and plots scatter plots.
@@ -156,6 +155,7 @@ class principal_component_finder:
                 plt.close()
 
         return df_TET_feelings_prin_dict
+
 
 # =============================================================================|
 # Custom HMM Model using multivariate t–distribution                           |
@@ -536,6 +536,9 @@ class CustomHMMClustering:
         avg_state_seq = np.apply_along_axis(lambda x: np.bincount(x.astype(int)).argmax(), axis=1, arr=all_state_seqs)
         avg_log_prob = np.mean(all_log_probs)
         avg_log_lik = np.mean(all_log_liks)
+        # Add gamma values to the DataFrame
+        gamma_columns = [f'gamma_{i}' for i in range(num_states)]
+        self.array[gamma_columns] = self.avg_fs
 
         print(f"Selected clusters with average log probability: {avg_log_prob}")
 
@@ -641,12 +644,17 @@ class CustomHMMClustering:
             f.write("\n".join(summary))
 
     def analyze_transitions(self, num_states, abrupt_gamma_threshold=0.7):
+        # Initialize transition labels as original labels (converted to strings)
+        self.array['transition_label'] = self.array['labels'].apply(lambda x: str(x + 1))  # Convert to 1-based strings
+
         group_keys = ['Subject', 'Week', 'Session'] if self.has_week else ['Subject', 'Session']
         self.group_transitions = {}
+        gamma_columns = [f'gamma_{i}' for i in range(num_states)]
 
         for heading, group in self.array.groupby(group_keys):
             group_labels = group['labels'].values
-            group_fs = group[self.feelings].values  # Ensure this is the gamma values from the HMM
+            group_gammas = group[gamma_columns].values
+            group_indices = group.index  # Indices in the original self.array DataFrame
             threshold = self.calculate_dynamic_threshold(group[self.feelings])
             min_state_duration = 5
 
@@ -655,31 +663,39 @@ class CustomHMMClustering:
 
             for i in range(1, len(group_labels)):
                 if group_labels[i] != group_labels[i - 1]:
-                    if i - segment_start >= min_state_duration:
-                        new_state = group_labels[i]
+                    if (i - segment_start) >= min_state_duration:
+                        from_state = group_labels[i - 1]
+                        to_state = group_labels[i]
                         transition_start = i - 1
                         transition_end = i
 
                         # Expand transition start backward
                         while (transition_start > segment_start and
-                            np.abs(group_fs[transition_start, new_state] - group_fs[transition_start - 1, new_state]) > threshold / 2):
+                            np.abs(group_gammas[transition_start, to_state] - 
+                            group_gammas[transition_start - 1, to_state]) > threshold / 2):
                             transition_start -= 1
 
                         # Expand transition end forward
                         while (transition_end < len(group_labels) - 1 and
-                            np.abs(group_fs[transition_end, new_state] - group_fs[transition_end + 1, new_state]) > threshold / 2):
+                            np.abs(group_gammas[transition_end, to_state] - 
+                            group_gammas[transition_end + 1, to_state]) > threshold / 2):
                             transition_end += 1
 
                         # Calculate max gamma for the new state in the transition window
-                        max_gamma = np.max(group_fs[transition_start:transition_end + 1, new_state])
-                        transition_label = "abrupt" if max_gamma >= abrupt_gamma_threshold else "gradual"
+                        max_gamma = np.max(group_gammas[transition_start:transition_end + 1, to_state])
+                        transition_type = "abrupt" if max_gamma >= abrupt_gamma_threshold else "gradual"
 
-                        transitions.append((transition_start, transition_end, group_labels[i - 1], new_state, transition_label))
+                        transitions.append((transition_start, transition_end, from_state, to_state, transition_type))
+
+                        # Update transition_label for the transition window
+                        transition_indices = group_indices[transition_start : transition_end + 1]
+                        transition_str = f"{from_state + 1} to {to_state + 1}"
+                        self.array.loc[transition_indices, 'transition_label'] = transition_str
 
                     segment_start = i
 
             self.group_transitions[heading] = transitions
-    
+
     def calculate_dynamic_threshold(self, avg_fs):
         # Compute absolute changes in state probabilities
         changes = np.abs(np.diff(avg_fs, axis=0))

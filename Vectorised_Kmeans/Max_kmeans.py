@@ -42,7 +42,9 @@ kmeans_clustering_instance = KMeansVectorClustering(
 
 # Call the appropriate methods to get the values you need
 differences_array, dictionary_clust_labels = kmeans_clustering_instance.run()  # Ensure data is processed
+differences_array.to_csv("/Users/a_fin/Desktop/Year 4/Project/Data/VKM_output.csv", index=False)
 
+# 1 is 2a, 3 is 2b, 0 is 1 and 1 is 3 this is for clust and clust_name
 # Create an instance of KMeansVisualizer
 visualizer = KMeansVectorVisualizer(
     filelocation_TET = config['filelocation_TET'], 
@@ -55,14 +57,14 @@ visualizer = KMeansVectorVisualizer(
     no_of_jumps=config['no_of_jumps']
 ).run()
 
-jump_analysis = JumpAnalysis(
-    config['filelocation_TET'], 
-    config['savelocation_TET'], 
-    df_csv_file_original, 
-    config['feelings'], 
-    config['feelings_diffs']
-)
+# jump_analysis = JumpAnalysis(
+#     config['filelocation_TET'], 
+#     config['savelocation_TET'], 
+#     df_csv_file_original, 
+#     config['feelings'], 
+#     config['feelings_diffs']
+# )
 
-jump_analysis.determine_no_jumps_stability()
-jump_analysis.determine_no_jumps_consistency()
-jump_analysis.determine_no_of_jumps_autocorrelation()
+# jump_analysis.determine_no_jumps_stability()
+# jump_analysis.determine_no_jumps_consistency()
+# jump_analysis.determine_no_of_jumps_autocorrelation()
