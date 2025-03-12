@@ -254,8 +254,8 @@ class KMeansVectorClustering:
         # Plot cluster centres as vectors
         cluster_centres_prin = np.transpose(self.cluster_centres_fin.dot(self.principal_components.T), (1, 0))
         for i in range(cluster_centres_prin.shape[1]):
-            plt.arrow(0, 0, cluster_centres_prin[0, i], cluster_centres_prin[1, i], head_width=0.1, head_length=0.1, fc=self.colours_list[i], ec=self.colours_list[i])
-        
+            plt.arrow(0, 0, cluster_centres_prin[0, i], cluster_centres_prin[1, i], head_width=0.1, head_length=0.1,
+                      fc=self.colours_list[i], ec=self.colours_list[i])
         plt.xlabel("Principal Component 1 (Bored*Effort)")
         plt.ylabel("Principal Component 2 (Calm)")
         plt.legend([f'Cluster {i+1}' for i in range(cluster_centres_prin.shape[1])])
@@ -327,10 +327,23 @@ class KMeansVectorClustering:
             plt.savefig(self.savelocation_TET + f'K-Vector_Cluster_Centroids_for_stable_cluster_{i}')
             plt.close()
 
+    def expand_to_original_shape(self):
+        """
+        Expand the downsampled clustering results back to the original DataFrame's shape.
+        This method creates a new column with cluster labels by merging the downsampled labels
+        into the original dataset, then uses forward/backward filling to fill the gaps.
+        """
+        # Copy the original DataFrame
+        expanded_df = self.df_csv_file_original.copy()
+        # Create a new column for the cluster labels, initializing with NaNs
+        expanded_df['cluster_label'] = np.nan
+        # Use the downsampled indices to assign the cluster labels
+        expanded_df.loc[self.differences_array.index, 'cluster_label'] = self.differences_array['clust']
+        # Fill missing values (adjust the fill method if needed)
+        expanded_df['cluster_label'] = expanded_df['cluster_label'].fillna(method='ffill').fillna(method='bfill')
+        return expanded_df
+
     def run(self):
-        """
-        Execute all steps: preprocessing, clustering, plotting, and analysis.
-        """
         self.preprocess_data()
         self.perform_clustering()
         self.plot_results()
