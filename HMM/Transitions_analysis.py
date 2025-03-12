@@ -14,18 +14,19 @@ df = df[df["Start Time (s)"] != 0].copy()
 
 # Define transition labeling function
 def classify_transition(row):
+    time_short = 175
     from_state = row["From State"]
     to_state = row["To State"]
     duration = row["Duration (s)"]
 
     # Example classification logic (customize as needed)
     if from_state == 1 and to_state == 2:
-        if duration < 100:
+        if duration < time_short:
             return "Short 1→2"
         else:
             return "Long 1→2"
     elif from_state == 2 and to_state == 1:
-        if duration < 100:
+        if duration < time_short:
             return "Short 2→1"
         else:
             return "Long 2→1"
@@ -223,3 +224,4 @@ plt.ylabel("Count of Transitions")
 plt.grid(axis='y', alpha=0.3)
 plt.tight_layout()
 plt.savefig('/Users/a_fin/Desktop/Year 4/Project/Data/Interpretation/temporal_distribution.png')
+
