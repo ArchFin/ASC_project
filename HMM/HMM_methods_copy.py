@@ -238,7 +238,7 @@ class HMMModel:
     @staticmethod
     def update_transition_probabilities(xi, num_states):
         # Use a Dirichlet prior to encourage state persistence
-        prior_strength = 5.0  #Configurable hyperparameter
+        prior_strength = 2.0  #Configurable hyperparameter
         prior = np.eye(num_states) * prior_strength
         trans_prob = np.sum(xi, axis=2) + prior  # Add prior instead of scaling
         trans_prob /= trans_prob.sum(axis=1, keepdims=True)
@@ -263,7 +263,7 @@ class HMMModel:
             covariances[j, :, :] = make_positive_definite(covariances[j, :, :])
             # covariances[j, :, :] = (diff.T * gamma_j) @ diff / sum_gamma
             # Add regularization and mean separation:
-            covariances[j, :, :] += np.eye(num_emissions) * 1e-3  # Covariance regularization
+            covariances[j, :, :] += np.eye(num_emissions) * 1e-4  # Covariance regularization
             if j > 0:  # Push cluster means apart
                 means[j, :] += 0 * (means[j, :] - np.mean(means[:j, :], axis=0))
             nu[j] = estimate_nu(gamma_j, data, means[j, :], covariances[j, :, :])
@@ -396,7 +396,7 @@ class HMMModel:
         for iteration in range(num_iterations):
             print(f"Training iteration {iteration + 1} of {num_iterations}")
             # Gradually increase transition flexibility
-            transition_constraint = max(0.5, 1.0 - iteration/num_iterations)
+            transition_constraint = max(0.7, 1.0 - 0.3 * (iteration/num_iterations))
             
             # Modified E-step with constraints
             gamma_vals, xi = self.e_step(data)
@@ -732,7 +732,6 @@ class CustomHMMClustering:
             # Store gamma values for later analysis
             self.gamma_values = self.array[gamma_columns].values
             self.abrupt_transition_mask = (self.gamma_values.max(axis=1) >= abrupt_gamma_threshold)
-
 
     def calculate_dynamic_threshold(self, avg_fs):
         # Compute absolute changes in state probabilities

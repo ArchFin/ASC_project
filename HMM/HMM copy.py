@@ -46,8 +46,8 @@ no_of_jumps = config['no_of_jumps']
 clustering = CustomHMMClustering(config['filelocation_TET'], config['savelocation_TET'],
                                     df_csv_file_original, feelings, principal_components, no_of_jumps)
 
-results_array, dictionary_clust_labels, transitions = clustering.run(num_states=2, num_iterations=50, num_repetitions=50)
-results_array.to_csv("/Users/a_fin/Desktop/Year 4/Project/Data/HMM_output.csv", index=False)
+results_array, dictionary_clust_labels, transitions = clustering.run(num_states=2, num_iterations=20, num_repetitions=10)
+results_array.to_csv("/Users/a_fin/Desktop/Year 4/Project/Data/HMM_output_adjusted.csv", index=False)
 
 # Instantiate and run the visualiser.
 visualiser_instance = Visualiser(
@@ -64,7 +64,7 @@ visualiser_instance = Visualiser(
 )
 visualiser_instance.run()
 
-
+# s17 week 1 run 6
 # analysis = HMMJumpAnalysis(
 #     filelocation_TET=config['filelocation_TET'],
 #     savelocation_TET=config['savelocation_TET'],
