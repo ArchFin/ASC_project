@@ -22,6 +22,8 @@ from tqdm import tqdm  # For progress bars
 from scipy.special import logsumexp
 from scipy.optimize import linear_sum_assignment
 from collections import defaultdict
+from sklearn.mixture import GaussianMixture
+from scipy.stats import multivariate_normal
 
 # =============================================================================|
 # Configuration via YAML                                                       |
@@ -160,28 +162,44 @@ class principal_component_finder:
 # Custom HMM Model using multivariate t–distribution                           |
 # =============================================================================|
 class HMMModel:
-    def __init__(self, num_states, num_emissions, data=None, random_seed=12345):
-        self.num_states = num_states
-        self.num_emissions = num_emissions
+    def __init__(self, num_base_states, num_emissions, data=None, random_seed=12345):
+        """
+        The model will have an extra state in addition to the base states.
+        num_base_states: number of "pure" states.
+        Total number of states = num_base_states + 1.
+        """
+        self.num_base_states = num_base_states
+        self.num_states = num_base_states + 1  # Extra state for transitions.
         np.random.seed(random_seed)
         random.seed(random_seed)
 
-        # Improved initialization using K-means
         if data is not None:
-            kmeans = KMeans(n_clusters=num_states, random_state=random_seed).fit(data)
-            self.emission_means = kmeans.cluster_centers_
-            # Diagonal-dominated initialization (favor state persistence):
-            self.trans_prob = np.eye(num_states) * 0.8 + np.ones((num_states, num_states)) * 0.2/(num_states-1)
-            np.fill_diagonal(self.trans_prob, 0.8)  # 80% self-transition probability
-            self.trans_prob /= self.trans_prob.sum(axis=1, keepdims=True)  # Ensure row normalization
-        else:
-            self.emission_means = np.random.randn(num_states, num_emissions)
-            self.trans_prob = np.random.dirichlet(np.ones(num_states), size=num_states)
+            # Initialize emission means using K-means on base states only.
+            kmeans = KMeans(n_clusters=num_base_states, init='k-means++', random_state=random_seed).fit(data)
+            base_centers = kmeans.cluster_centers_
+            self.emission_means = np.zeros((self.num_states, num_emissions))
+            # Base states get the k-means centers.
+            self.emission_means[:num_base_states] = base_centers
+            # Compute an offset based on spread of base centers.
+            offset = 0.1 * (np.max(base_centers, axis=0) - np.min(base_centers, axis=0))
+            # Transitional state gets the average plus offset.
+            self.emission_means[-1] = np.mean(base_centers, axis=0) + offset
 
-        # Regularization for covariance matrices
-        self.emission_covs = np.stack([np.eye(num_emissions)+1e-4*np.random.randn(num_emissions,num_emissions) 
-                                      for _ in range(num_states)])
-        self.nu = np.clip(np.random.gamma(5, 1, num_states), 2, 10)
+            # Diagonal-dominated initialization for transition probabilities.
+            base_prob = 0.8 
+            self.trans_prob = np.eye(self.num_states) * base_prob + \
+                              np.ones((self.num_states, self.num_states)) * (1 - base_prob) / (self.num_states - 1)
+            self.trans_prob /= self.trans_prob.sum(axis=1, keepdims=True)
+        else:
+            self.emission_means = np.random.randn(self.num_states, num_emissions)
+            self.trans_prob = np.random.dirichlet(np.ones(self.num_states), size=self.num_states)
+
+        # Initialize emission covariances and degrees of freedom for t–distribution.
+        self.emission_covs = np.stack([
+            np.eye(num_emissions) + 1e-4 * np.random.randn(num_emissions, num_emissions)
+            for _ in range(self.num_states)
+        ])
+        self.nu = np.clip(np.random.gamma(5, 1, self.num_states), 2, 10)
 
     @staticmethod
     def mvtpdf(x, mu, Sigma, nu):
@@ -191,7 +209,6 @@ class HMMModel:
         det_Sigma = np.linalg.det(Sigma)
         mahalanobis = x_mu @ Sigma_inv @ x_mu
 
-        # Compute log-pdf to avoid underflow
         log_norm = (np.log(gamma((nu + d)/2)) 
                     - np.log(gamma(nu/2)) 
                     - (d/2) * np.log(nu * np.pi) 
@@ -201,54 +218,51 @@ class HMMModel:
 
     @staticmethod
     def make_positive_definite(cov_matrix):
-        cov_matrix = 0.5 * (cov_matrix + cov_matrix.T)  # Force symmetry
+        cov_matrix = 0.5 * (cov_matrix + cov_matrix.T)  # Ensure symmetry.
         d = cov_matrix.shape[0]
-        cov_matrix += 1e-6 * np.eye(d)  # Add regularization
+        cov_matrix += 1e-4 * np.eye(d)  # Regularization.
         eigenvalues, eigenvectors = np.linalg.eigh(cov_matrix)
-        eigenvalues = np.clip(eigenvalues, 1e-6, None)  # Clip eigenvalues
+        eigenvalues = np.clip(eigenvalues, 1e-4, None)
         return eigenvectors @ np.diag(eigenvalues) @ eigenvectors.T
 
     @staticmethod
     def estimate_nu(gamma_vals, data, mean, covariance, max_iter=100):
         N, d = data.shape
         diff = data - mean
-        inv_cov = np.linalg.pinv(covariance)  # More stable pseudo-inverse
-        
-        # Compute squared Mahalanobis distances
+        inv_cov = np.linalg.pinv(covariance)
         r = np.einsum('ij,ij->i', diff @ inv_cov, diff)
-        
-        # Initialize nu using moment matching
         nu = np.clip(2/(np.mean(r/(d + 2)) - 1), 2, 10)
-        
         for _ in range(max_iter):
-            w = (nu + d)/(nu + r)
+            w = (nu + d) / (nu + r)
             numerator = np.sum(gamma_vals * (np.log(w) - w))
-            denominator = np.sum(gamma_vals * (psi((nu + d)/2) - np.log((nu + d)/2)))
-            
+            denominator = np.sum(gamma_vals * (psi((nu + d) / 2) - np.log((nu + d) / 2)))
             if abs(denominator) < 1e-12:
                 break
-                
-            nu_new = nu - numerator/denominator
+            nu_new = nu - numerator / denominator
             if abs(nu_new - nu) < 1e-4:
                 break
             nu = np.clip(nu_new, 2, 20)
-            
         return nu
-    
+
     @staticmethod
     def update_transition_probabilities(xi, num_states):
-        # Use a Dirichlet prior to encourage state persistence
-        prior_strength = 2.0  #Configurable hyperparameter
-        prior = np.eye(num_states) * prior_strength
-        trans_prob = np.sum(xi, axis=2) + prior  # Add prior instead of scaling
+        """
+        Use a Dirichlet prior with differential weights to encourage state persistence 
+        and reduce transitions into/out of the extra state.
+        """
+        # Set a higher prior for base states and lower for the extra state.
+        base_prior = 2.0
+        extra_prior = 0.5
+        prior = np.full((num_states, num_states), base_prior)
+        # For transitions involving the extra (last) state, use the extra_prior.
+        prior[-1, :] = extra_prior
+        prior[:, -1] = extra_prior
+        trans_prob = np.sum(xi, axis=2) + prior
         trans_prob /= trans_prob.sum(axis=1, keepdims=True)
         return trans_prob
 
     @staticmethod
     def update_emission_parameters(data, gamma, num_states, make_positive_definite, estimate_nu):
-        """
-        Update emission means, covariances and nu using weighted statistics.
-        """
         num_data, num_emissions = data.shape
         means = np.zeros((num_states, num_emissions))
         covariances = np.zeros((num_states, num_emissions, num_emissions))
@@ -261,20 +275,13 @@ class HMMModel:
             diff = data - means[j, :]
             covariances[j, :, :] = (diff.T * gamma_j) @ diff / sum_gamma
             covariances[j, :, :] = make_positive_definite(covariances[j, :, :])
-            # covariances[j, :, :] = (diff.T * gamma_j) @ diff / sum_gamma
-            # Add regularization and mean separation:
-            covariances[j, :, :] += np.eye(num_emissions) * 1e-4  # Covariance regularization
-            if j > 0:  # Push cluster means apart
+            covariances[j, :, :] += np.eye(num_emissions) * 1e-4
+            if j > 0:  # Optionally push means apart (currently no shift applied)
                 means[j, :] += 0 * (means[j, :] - np.mean(means[:j, :], axis=0))
             nu[j] = estimate_nu(gamma_j, data, means[j, :], covariances[j, :, :])
-
         return means, covariances, nu
 
     def _compute_emission_probs(self, data):
-        """
-        Precompute the emission probability for each observation and state.
-        Returns an array of shape (num_data, num_states).
-        """
         num_data = data.shape[0]
         emission_probs = np.zeros((num_data, self.num_states))
         for j in range(self.num_states):
@@ -283,21 +290,15 @@ class HMMModel:
         return emission_probs
 
     def e_step(self, data):
-        """
-        Perform the expectation (E‐step) by computing forward (alpha), backward (beta),
-        smoothed probabilities (gamma) and pairwise state probabilities (xi).
-        """
         num_data = data.shape[0]
-        num_states = self.num_states
-
         emission_probs = self._compute_emission_probs(data)
-        alpha = np.zeros((num_data, num_states))
-        beta = np.zeros((num_data, num_states))
-        gamma_vals = np.zeros((num_data, num_states))
-        xi = np.zeros((num_states, num_states, num_data - 1))
+        alpha = np.zeros((num_data, self.num_states))
+        beta = np.zeros((num_data, self.num_states))
+        gamma_vals = np.zeros((num_data, self.num_states))
+        xi = np.zeros((self.num_states, self.num_states, num_data - 1))
 
         # Forward pass.
-        alpha[0, :] = emission_probs[0, :] * (1 / num_states)
+        alpha[0, :] = emission_probs[0, :] * (1 / self.num_states)
         alpha[0, :] /= np.sum(alpha[0, :])
         for t in range(1, num_data):
             alpha[t, :] = emission_probs[t, :] * (alpha[t - 1, :] @ self.trans_prob)
@@ -324,64 +325,44 @@ class HMMModel:
         return gamma_vals, xi
 
     def forward_backward(self, data):
-        """
-        Forward-Backward algorithm in log-space to avoid numerical underflow.
-        Returns log_alpha, log_beta, gamma (state probabilities) and overall log-likelihood.
-        """
         num_data = data.shape[0]
-        num_states = self.num_states
         log_emission_probs = np.log(self._compute_emission_probs(data) + 1e-12)
         log_trans_prob = np.log(self.trans_prob + 1e-12)
+        log_alpha = np.full((num_data, self.num_states), -np.inf)
+        log_beta = np.full((num_data, self.num_states), -np.inf)
 
-        log_alpha = np.full((num_data, num_states), -np.inf)
-        log_beta = np.full((num_data, num_states), -np.inf)
-
-        # Initialize log_alpha
-        log_alpha[0, :] = log_emission_probs[0, :] - np.log(num_states)
+        log_alpha[0, :] = log_emission_probs[0, :] - np.log(self.num_states)
         for t in range(1, num_data):
-            for j in range(num_states):
+            for j in range(self.num_states):
                 log_alpha[t, j] = log_emission_probs[t, j] + logsumexp(log_alpha[t - 1, :] + log_trans_prob[:, j])
         
-        # Initialize log_beta
-        log_beta[-1, :] = 0  # log(1) = 0
+        log_beta[-1, :] = 0
         for t in range(num_data - 2, -1, -1):
-            for j in range(num_states):
+            for j in range(self.num_states):
                 log_beta[t, j] = logsumexp(log_trans_prob[j, :] + log_emission_probs[t + 1, :] + log_beta[t + 1, :])
         
-        # Calculate log-gamma (smoothed state probabilities)
         log_gamma = log_alpha + log_beta
         log_gamma -= logsumexp(log_gamma, axis=1, keepdims=True)
-        
-        # Overall log-likelihood can be computed from the alpha values.
         log_lik = logsumexp(log_alpha[-1, :])
         
         return log_alpha, log_beta, np.exp(log_gamma), log_lik
 
     def decode(self, data):
-        """
-        Viterbi algorithm in log-space.
-        Returns the most likely sequence of states.
-        """
         num_data = data.shape[0]
-        num_states = self.num_states
         log_emission_probs = np.log(self._compute_emission_probs(data) + 1e-12)
         log_trans_prob = np.log(self.trans_prob + 1e-12)
+        log_delta = np.full((num_data, self.num_states), -np.inf)
+        psi = np.zeros((num_data, self.num_states), dtype=int)
 
-        log_delta = np.full((num_data, num_states), -np.inf)
-        psi = np.zeros((num_data, num_states), dtype=int)
-
-        log_delta[0, :] = log_emission_probs[0, :] - np.log(num_states)
+        log_delta[0, :] = log_emission_probs[0, :] - np.log(self.num_states)
         for t in range(1, num_data):
-            for j in range(num_states):
+            for j in range(self.num_states):
                 temp = log_delta[t - 1, :] + log_trans_prob[:, j]
                 psi[t, j] = np.argmax(temp)
                 log_delta[t, j] = log_emission_probs[t, j] + np.max(temp)
         
-        # Termination step - Get the log probability of the best final state
-        log_prob = np.max(log_delta[-1, :])  # Log-probability of the best state sequence
-        last_state = np.argmax(log_delta[-1, :])  # Best final state
-
-        # Backtracking step
+        log_prob = np.max(log_delta[-1, :])
+        last_state = np.argmax(log_delta[-1, :])
         state_seq = np.zeros(num_data, dtype=int)
         state_seq[-1] = last_state
         for t in range(num_data - 2, -1, -1):
@@ -389,22 +370,23 @@ class HMMModel:
         
         return state_seq, log_prob 
 
-    def train(self, data, num_iterations, num_states):
-        """
-        Baum–Welch training loop. At each iteration, compute the E‐step and update model parameters.
-        """
+    def train(self, data, num_iterations):
         for iteration in range(num_iterations):
             print(f"Training iteration {iteration + 1} of {num_iterations}")
-            # Gradually increase transition flexibility
-            transition_constraint = max(0.7, 1.0 - 0.3 * (iteration/num_iterations))
-            
-            # Modified E-step with constraints
+            # Gradually relax transition constraints.
+            transition_constraint = max(0.5, 1.0 - 0.5 * (iteration / num_iterations))
             gamma_vals, xi = self.e_step(data)
             
-            # Apply curriculum learning to transitions
-            constrained_xi = xi * transition_constraint
-            self.trans_prob = self.update_transition_probabilities(constrained_xi, num_states)
-
+            # Apply curriculum learning: scale transitions differently for the extra state.
+            scaling = np.ones_like(xi)
+            # Reduce contributions for transitions involving the extra state (last index).
+            scaling[-1, :] = transition_constraint * 0.5
+            scaling[:, -1] = transition_constraint * 0.5
+            constrained_xi = xi * scaling
+            
+            self.trans_prob = self.update_transition_probabilities(constrained_xi, self.num_states)
+            gamma_vals = np.clip(gamma_vals, 1e-3, 1.0)
+            gamma_vals /= gamma_vals.sum(axis=1, keepdims=True)
             self.emission_means, self.emission_covs, self.nu = self.update_emission_parameters(
                 data, gamma_vals, self.num_states,
                 make_positive_definite=self.make_positive_definite,
@@ -413,7 +395,7 @@ class HMMModel:
         return self.trans_prob, self.emission_means, self.emission_covs, self.nu
 
 # =============================================================================|
-# Custom HMM Clustering using the Custom HMM Model                             |
+# Custom Clustering Pipeline Using the Transition-State HMM Model              |
 # =============================================================================|
 class CustomHMMClustering:
     def __init__(self, filelocation_TET, savelocation_TET, df_csv_file_original, feelings, principal_components, no_of_jumps):
@@ -423,28 +405,22 @@ class CustomHMMClustering:
         self.feelings = feelings
         self.principal_components = principal_components
         self.no_of_jumps = no_of_jumps
-        self.has_week = 'Week' in df_csv_file_original.columns  # Check if 'Week' exists
+        self.has_week = 'Week' in df_csv_file_original.columns
 
     def preprocess_data(self):
-        # Determine grouping keys based on presence of 'Week'
         group_keys = ['Subject', 'Week', 'Session'] if self.has_week else ['Subject', 'Session']
-        
         split_dict_skip = {}
         for keys, group in self.df_csv_file_original.groupby(group_keys):
             group = group.iloc[::self.no_of_jumps].copy()
             split_dict_skip[keys] = group
-
         self.df_csv_file = pd.concat(split_dict_skip.values())
-
         split_dict = {}
         for keys, group in self.df_csv_file.groupby(group_keys):
             split_dict[keys] = group.copy()
-
         self.array = pd.concat(split_dict.values())
         self.array['number'] = range(self.array.shape[0])
 
     def _align_states(self, ref_model, target_model, num_states):
-        # Hungarian algorithm to match states by emission means
         cost_matrix = np.zeros((num_states, num_states))
         for i in range(num_states):
             for j in range(num_states):
@@ -452,71 +428,66 @@ class CustomHMMClustering:
                     ref_model.emission_means[i] - target_model.emission_means[j]
                 )
         row_ind, col_ind = linear_sum_assignment(cost_matrix)
-        return col_ind  # Maps target states to reference indices
+        return col_ind
 
     def _permute_states(self, model, permutation):
-        # Reorder model parameters to match reference
         model.emission_means = model.emission_means[permutation]
         model.emission_covs = model.emission_covs[permutation]
         model.trans_prob = model.trans_prob[permutation][:, permutation]
         model.nu = model.nu[permutation]
         return model
 
-    def perform_clustering(self, num_states, num_iterations, num_repetitions):
-        """
-        run multiple repetitions (with different random seeds)
-        and then average the resulting outputs to obtain final parameters and state sequences.
-        """
+    def _balance_clusters(self, num_states):
+        label_counts = self.array['labels'].value_counts()
+        small_clusters = label_counts[label_counts < 0.1 * len(self.array)].index
+        for sc in small_clusters:
+            mask = self.array['labels'] == sc
+            distances = cdist(self.array.loc[mask, self.feelings], 
+                              self.cluster_centres_fin, 'mahalanobis')
+            new_labels = np.argmin(distances, axis=1)
+            self.array.loc[mask, 'labels'] = new_labels
+
+    def perform_clustering(self, num_base_states, num_iterations, num_repetitions):
         num_emissions = len(self.feelings)
         data = self.array[self.feelings].values
         
-        # Z-score normalization
+        # Z-score normalization.
         self.mean = np.mean(data, axis=0)
         self.std = np.std(data, axis=0)
-        self.std[self.std == 0] = 1.0  # Prevent division by zero
+        self.std[self.std == 0] = 1.0
         data_normalized = (data - self.mean) / self.std
 
-        # Rest of the method uses normalized data for training
         N = data_normalized.shape[0]
-
-        # Preallocate arrays to store results for each repetition.
-        all_trans_probs = np.zeros((num_states, num_states, num_repetitions))
-        all_emission_means = np.zeros((num_states, num_emissions, num_repetitions))
-        all_emission_covs = np.zeros((num_states, num_emissions, num_emissions, num_repetitions))
-        all_fs = np.zeros((N, num_states, num_repetitions))
+        all_trans_probs = np.zeros((num_base_states + 1, num_base_states + 1, num_repetitions))
+        all_emission_means = np.zeros((num_base_states + 1, num_emissions, num_repetitions))
+        all_emission_covs = np.zeros((num_base_states + 1, num_emissions, num_emissions, num_repetitions))
+        all_fs = np.zeros((N, num_base_states + 1, num_repetitions))
         all_state_seqs = np.zeros((N, num_repetitions))
         all_log_probs = np.zeros(num_repetitions)
         all_log_liks = np.zeros(num_repetitions)
 
         for rep in range(num_repetitions):
             print(f"Repetition {rep + 1} of {num_repetitions}")
-            # Set random seeds for reproducibility.
             np.random.seed(12345 + rep)
             random.seed(12345 + rep)
             
-            # Create and train the model.
-            model = HMMModel(num_states, num_emissions=num_emissions, data=data_normalized,  random_seed=12345 + rep)
-            model.train(data_normalized, num_iterations=num_iterations, num_states = num_states)
+            model = HMMModel(num_base_states, num_emissions=num_emissions, data=data_normalized, random_seed=12345 + rep)
+            model.train(data_normalized, num_iterations=num_iterations)
             
-            # Decode state sequence and get log probability.
             state_seq, log_prob = model.decode(data_normalized)
-            # Obtain forward-backward results.
             _, _, fs, log_lik = model.forward_backward(data_normalized)
             
-            # Align states to reference (first repetition)
             if rep == 0:
                 reference_model = model
             else:
-                alignment = self._align_states(reference_model, model, num_states)
+                alignment = self._align_states(reference_model, model, num_base_states + 1)
                 model = self._permute_states(model, alignment)
                 
-            # Optionally print shapes to verify.
             print(f"Transition probabilities shape: {model.trans_prob.shape}")
             print(f"Emission means shape: {model.emission_means.shape}")
             print(f"Emission covariances shape: {model.emission_covs.shape}")
             print(f"Degrees of freedom shape: {model.nu.shape}")
             
-            # Save outputs for this repetition.
             all_trans_probs[:, :, rep] = model.trans_prob
             all_emission_means[:, :, rep] = model.emission_means
             all_emission_covs[:, :, :, rep] = model.emission_covs
@@ -525,51 +496,44 @@ class CustomHMMClustering:
             all_log_probs[rep] = log_prob
             all_log_liks[rep] = log_lik
 
-        
-        # Average results across repetitions.
         avg_trans_prob = np.mean(all_trans_probs, axis=2)
         avg_emission_means = np.mean(all_emission_means, axis=2)
         avg_emission_covs = np.mean(all_emission_covs, axis=3)
         self.avg_fs = np.mean(all_fs, axis=2)
-        # For state sequence, take the mode at each time point.
         avg_state_seq = np.apply_along_axis(lambda x: np.bincount(x.astype(int)).argmax(), axis=1, arr=all_state_seqs)
         avg_log_prob = np.mean(all_log_probs)
         avg_log_lik = np.mean(all_log_liks)
-        # Add gamma values to the DataFrame
-        gamma_columns = [f'gamma_{i}' for i in range(num_states)]
+        gamma_columns = [f'gamma_{i}' for i in range(num_base_states + 1)]
         self.array[gamma_columns] = self.avg_fs
 
         print(f"Selected clusters with average log probability: {avg_log_prob}")
 
-        # Assign the averaged state sequence and emission means as cluster centres.
         self.array['labels'] = avg_state_seq
         self.labels_fin = self.array['labels']
-        self.cluster_centres_fin = avg_emission_means * self.std + self.mean
+        self.cluster_centres_fin = avg_emission_means[:num_base_states] * self.std + self.mean
         
     def calculate_dictionary_clust_labels(self):
-        """
-        Calculate a dictionary mapping each unique cluster label to a human-readable string.
-        For example, if the labels are 0, 1, 2 then this creates:
-          {0: 'Cluster 1', 1: 'Cluster 2', 2: 'Cluster 3'}
-        """
         unique_labels = sorted(self.array['labels'].unique())
         self.dictionary_clust_labels = {label: f"Cluster {label+1}" for label in unique_labels}
 
+    def recompute_cluster_centres(self):
+        unique_labels = sorted(self.array['labels'].unique())
+        cluster_centres = []
+        for label in unique_labels:
+            cluster_data = self.array[self.array['labels'] == label][self.feelings].values
+            cluster_mean = cluster_data.mean(axis=0)
+            cluster_centres.append(cluster_mean)
+        self.cluster_centres_fin = np.array(cluster_centres)
+
     def plot_results(self):
-        """
-        Project the data onto the principal components and plot the state assignments.
-        The cluster centres (emission means) are also projected and plotted as arrows.
-        """
-        # Compute the principal component projection for the data.
-        data_features = self.array[self.feelings]  # Ensure correct feature extraction
+        data_features = self.array[self.feelings]
         projected = data_features.dot(self.principal_components.T)
         self.array["principal component 1"] = projected.iloc[:, 0]
         self.array["principal component 2"] = projected.iloc[:, 1]
 
-        # Create a scatter plot of the state assignments.
-        num_states = np.max(self.labels_fin) + 1
+        num_clusters = np.max(self.labels_fin) + 1
         cmap = plt.get_cmap('tab10')
-        colours = [cmap(i) for i in range(num_states)]
+        colours = [cmap(i) for i in range(num_clusters)]
         plt.figure(figsize=(8, 6))
         plt.scatter(self.array["principal component 1"],
                     self.array["principal component 2"],
@@ -577,94 +541,87 @@ class CustomHMMClustering:
                     s=1)
         plt.xlabel("Principal Component 1")
         plt.ylabel("Principal Component 2")
-        plt.title("HMM State Assignments (Custom t–Distribution HMM)")
+        plt.title("Transition–State HMM Assignments")
         plt.tight_layout()
         plt.savefig(self.savelocation_TET + 'HMM_state_scatter_plot.png')
         plt.close()
 
-        # Correctly standardize cluster centers before projection
         centres_normalized = (self.cluster_centres_fin - self.mean) / self.std
         centres_projected = centres_normalized.dot(self.principal_components.T)
         
         plt.figure(figsize=(8, 6))
         for i in range(centres_projected.shape[0]):
             plt.arrow(0, 0, centres_projected[i, 0], centres_projected[i, 1],
-                    head_width=0.01, head_length=0.05, linewidth=0.5, color=colours[i], length_includes_head=True)
+                      head_width=0.01, head_length=0.05, linewidth=0.5, color=colours[i], length_includes_head=True)
             plt.text(centres_projected[i, 0], centres_projected[i, 1], f'State {i+1}', color=colours[i])
         plt.xlabel("Principal Component 1")
         plt.ylabel("Principal Component 2")
-        plt.title("State Centres for Custom HMM (Standardized)")
+        plt.title("Base State Centres (Excluding Transition State)")
         plt.tight_layout()
-        plt.savefig(self.savelocation_TET + 'state_centres_custom_HMM.png')
+        plt.savefig(self.savelocation_TET + 'state_centres_transition_HMM.png')
         plt.close()
 
     def _plot_cluster_features(self):
-        """Plot bar charts of emission means for each cluster in original feature space"""
         for cluster_idx in range(self.cluster_centres_fin.shape[0]):
             plt.figure(figsize=(10, 6))
             means = self.cluster_centres_fin[cluster_idx]
             sorted_indices = np.argsort(means)[::-1]
-            
-            plt.bar(range(len(self.feelings)), means[sorted_indices], 
-                    color=plt.cm.tab10(cluster_idx))
-            plt.xticks(range(len(self.feelings)), 
-                       np.array(self.feelings)[sorted_indices], 
-                       rotation=45, ha='right')
-            plt.title(f'State {cluster_idx+1} - Feature Means')
+            plt.bar(range(len(self.feelings)), means[sorted_indices], color=plt.cm.tab10(cluster_idx))
+            plt.xticks(range(len(self.feelings)), np.array(self.feelings)[sorted_indices], rotation=45, ha='right')
+            plt.title(f'Cluster {cluster_idx+1} - Feature Means')
             plt.ylabel('Mean Value')
             plt.tight_layout()
-            plt.savefig(self.savelocation_TET +
-                        f'state_{cluster_idx+1}_feature_means.png')
+            plt.savefig(self.savelocation_TET + f'cluster_{cluster_idx+1}_feature_means.png')
             plt.close()
 
     def _create_cluster_summary(self):
-        """Create text file summarizing key characteristics of each cluster"""
         summary = []
         for cluster_idx in range(self.cluster_centres_fin.shape[0]):
             means = self.cluster_centres_fin[cluster_idx]
-            sorted_features = sorted(zip(self.feelings, means), 
-                                    key=lambda x: x[1], reverse=True)
-            
-            # Get top 3 features
+            sorted_features = sorted(zip(self.feelings, means), key=lambda x: x[1], reverse=True)
             top_features = [f"{feat} ({val:.2f})" for feat, val in sorted_features[:4]]
-            
-            # Get bottom 3 features
             bottom_features = [f"{feat} ({val:.2f})" for feat, val in sorted_features[-4:]]
-            
             summary.append(f"""
-            State {cluster_idx+1}:
+            Cluster {cluster_idx+1}:
             - Dominant features: {', '.join(top_features)}
             - Lowest features: {', '.join(bottom_features)}
             - Mean vector norm: {np.linalg.norm(means):.2f}
             """)
-        
-        # Save to file
-        with open( self.savelocation_TET+'cluster_summary.txt', 'w') as f:
+        with open(self.savelocation_TET + 'cluster_summary.txt', 'w') as f:
             f.write("\n".join(summary))
 
-    def analyze_transitions(self, num_states, abrupt_gamma_threshold=0.6):
-        # Initialize transition labels as original labels (converted to strings)
-        self.array['transition_label'] = self.array['labels'].apply(lambda x: str(x + 1))  # Convert to 1-based strings
+    def post_process_cluster_three(self, cluster_three_label=2, gamma_threshold=0.55):
+        """
+        Reassign points in cluster 3 (the transition cluster) that have weak membership.
+        If the gamma value for cluster 3 is below the gamma_threshold, reassign these points 
+        to the base cluster with the highest gamma among the base clusters.
+        """
+        mask = (self.array['labels'] == cluster_three_label) & (self.array[f'gamma_{cluster_three_label}'] < gamma_threshold)
+        for idx in self.array[mask].index:
+            base_gammas = [self.array.at[idx, f'gamma_{i}'] for i in range(cluster_three_label)]
+            new_label = np.argmax(base_gammas)
+            self.array.at[idx, 'labels'] = new_label
+        self.calculate_dictionary_clust_labels()
 
+    def analyze_transitions(self, num_base_states, abrupt_gamma_threshold=0.6):
+        self.array['transition_label'] = self.array['labels'].apply(lambda x: str(x + 1))
         group_keys = ['Subject', 'Week', 'Session'] if self.has_week else ['Subject', 'Session']
         self.group_transitions = {}
-        gamma_columns = [f'gamma_{i}' for i in range(num_states)]
+        gamma_columns = [f'gamma_{i}' for i in range(num_base_states + 1)]
         if not all(col in self.array.columns for col in gamma_columns):
             self.array[gamma_columns] = self.avg_fs
 
-        # Parameters for the hybrid criteria
-        slope_threshold = 0.06            # Minimum required maximum slope (change in gamma) within the window
-        high_confidence_threshold = 0.59     # Gamma value considered as high confidence for the new state
-        fraction_threshold = 0.25         # Maximum fraction of time with high confidence to deifne abrupt
+        base_slope_threshold = 0.06
+        base_fraction_threshold = 0.25
+        small_cluster_threshold = 0.1
 
         for heading, group in self.array.groupby(group_keys):
             group_labels = group['labels'].values
             group_gammas = group[gamma_columns].values
-            group_indices = group.index  # Indices in the original self.array DataFrame
-            # Calculate a dynamic threshold based on the features (as before)
-            threshold = self.calculate_dynamic_threshold(group[self.feelings])
+            group_indices = group.index
+            total_in_group = len(group_labels)
+            threshold = self.calculate_dynamic_threshold(self.avg_fs)
             min_state_duration = 5
-
             transitions = []
             segment_start = 0
 
@@ -675,86 +632,64 @@ class CustomHMMClustering:
                         to_state = group_labels[i]
                         transition_start = i - 1
                         transition_end = i
+                        count_from = np.sum(group_labels == from_state)
+                        count_to = np.sum(group_labels == to_state)
+                        is_from_small = count_from < (small_cluster_threshold * total_in_group)
+                        is_to_small = count_to < (small_cluster_threshold * total_in_group)
+                        use_adjusted = is_from_small or is_to_small
+                        slope_threshold = base_slope_threshold * (0.8 if use_adjusted else 1.0)
+                        fraction_threshold = base_fraction_threshold * (1.2 if use_adjusted else 1.0)
+                        expansion_thresh = threshold * (0.3 if use_adjusted else 0.5)
 
-                        # Expand transition start backward
                         while (transition_start > segment_start and
-                            np.abs(group_gammas[transition_start, to_state] -
-                                    group_gammas[transition_start - 1, to_state]) > threshold / 2):
+                               np.abs(group_gammas[transition_start, to_state] - 
+                                      group_gammas[transition_start - 1, to_state]) > expansion_thresh):
                             transition_start -= 1
-
-                        # Expand transition end forward
                         while (transition_end < len(group_labels) - 1 and
-                            np.abs(group_gammas[transition_end, to_state] -
-                                    group_gammas[transition_end + 1, to_state]) > threshold / 2):
+                               np.abs(group_gammas[transition_end, to_state] - 
+                                      group_gammas[transition_end + 1, to_state]) > expansion_thresh):
                             transition_end += 1
 
-                        # Extract gamma values for the target state in the transition window
                         window_gammas = group_gammas[transition_start:transition_end + 1, to_state]
-
-                        # 1. Slope metric: compute differences in the new state's gamma over the transition window.
                         gamma_diff = np.diff(window_gammas)
-
-                        # Maximum slope:
                         max_slope = np.max(np.abs(gamma_diff)) if len(gamma_diff) > 0 else 0
-
-                        # 2. Fraction of "large" slopes metric:
-                        #    Instead of fraction of time gamma is above a "high confidence" threshold,
-                        #    measure how often the slope is bigger than some threshold (e.g., 0.05).
-                        slope_exceed_threshold = 0.05
-                        fraction_large_slopes = 0
-                        if len(gamma_diff) > 0:
-                            fraction_large_slopes = np.mean(np.abs(gamma_diff) >= slope_exceed_threshold)
-
-                        # Hybrid approach: classify as abrupt only if BOTH conditions are met
-                        # (1) max_slope >= slope_threshold
-                        # (2) fraction_large_slopes <= fraction_threshold
-
-                        slope_threshold = 0.06      
-                        fraction_threshold = 0.25   
+                        fraction_large_slopes = np.mean(np.abs(gamma_diff) >= 0.05) if len(gamma_diff) > 0 else 0
 
                         if max_slope >= slope_threshold and fraction_large_slopes <= fraction_threshold:
                             transition_type = "abrupt"
                         else:
                             transition_type = "gradual"
-
-                        # Then append or store transition_type as you do in your code
                         transitions.append((transition_start, transition_end, from_state, to_state, transition_type))
-
-
-                        # Update transition_label for the transition window
                         transition_indices = group_indices[transition_start:transition_end + 1]
                         transition_str = f"{from_state + 1} to {to_state + 1}"
                         self.array.loc[transition_indices, 'transition_label'] = transition_str
 
                     segment_start = i
-
             self.group_transitions[heading] = transitions
-            # Store gamma values for later analysis
-            self.gamma_values = self.array[gamma_columns].values
-            self.abrupt_transition_mask = (self.gamma_values.max(axis=1) >= abrupt_gamma_threshold)
+        self.gamma_values = self.array[gamma_columns].values
+        self.abrupt_transition_mask = (self.gamma_values.max(axis=1) >= abrupt_gamma_threshold)
 
     def calculate_dynamic_threshold(self, avg_fs):
-        # Compute absolute changes in state probabilities
         changes = np.abs(np.diff(avg_fs, axis=0))
         mean_change = np.mean(changes)
         std_change = np.std(changes)
-        threshold = mean_change + 0.05 * std_change  # From Maria's paper (Page 19)
+        threshold = mean_change + 0.05 * std_change
         return threshold
 
-    def run(self, num_states, num_iterations, num_repetitions):
-        """
-        Execute the complete pipeline: preprocessing, clustering, and plotting.
-        Also calculates the dictionary of cluster labels.
-        """
+    def run(self, num_base_states, num_iterations, num_repetitions):
         self.preprocess_data()
-        self.perform_clustering(num_states, num_iterations, num_repetitions)
+        self.perform_clustering(num_base_states, num_iterations, num_repetitions)
         self.calculate_dictionary_clust_labels()
         self.plot_results()
         self._plot_cluster_features()
         self._create_cluster_summary()
-        self.analyze_transitions(num_states)
-
-        return self.array, self.dictionary_clust_labels , self.group_transitions
+        # Post-process transitional cluster (cluster 3) as per strategy 4.
+        self.post_process_cluster_three(cluster_three_label=2, gamma_threshold=0.55)
+        # Adjust num_base_states if needed.
+        if num_base_states == 3:
+            num_base_states = num_base_states - 1
+        self.analyze_transitions(num_base_states)
+        return self.array, self.dictionary_clust_labels, self.group_transitions
 
 # =============================================================================|
 # Visualiser Class for Trajectory Plotting                                     |
@@ -960,8 +895,9 @@ class Visualiser:
     def run(self):
         """Execute full visualization pipeline"""
         self.preprocess_data()
-        self.plot_trajectories()       
-        self.save_transitions_to_file()
+        self.plot_trajectories()
+        if type(self.group_transitions) != list:
+            self.save_transitions_to_file()
 
 # ==================================================================================|
 # Jump Analysis Class (using raw feelings rather than differences like in k-means)  |
