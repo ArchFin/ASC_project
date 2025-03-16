@@ -152,10 +152,6 @@ class principal_component_finder:
 
         return df_TET_feelings_prin_dict
 
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-from sklearn.cluster import KMeans
 
 class KMeansVectorClustering:
     """
@@ -353,7 +349,7 @@ class KMeansVectorClustering:
 
 
 class KMeansVectorVisualizer:
-    def __init__(self, filelocation_TET, savelocation_TET, differences_array, df_csv_file_original, dictionary_clust_labels, principal_components, feelings, no_of_jumps):
+    def __init__(self, filelocation_TET, savelocation_TET, differences_array, df_csv_file_original, dictionary_clust_labels, principal_components, feelings, no_of_jumps, colours):
         # Initialize class variables with provided parameters
         self.filelocation_TET = filelocation_TET
         self.savelocation_TET = savelocation_TET
@@ -366,12 +362,9 @@ class KMeansVectorVisualizer:
         # 1 is 2a, 3 is 2b, 0 is 1 and 2 is 3 this is for clust and clust_name
         # Negative Stable Cluster (green 2b), then Positive Vectoral cluster (blue 1) and Positive Stable (yellow 2a), and ends with Negative Vectoral cluster (red 3).
         # Define a color map for different clusters s18week_1run_01
-        self.color_map = {
-            0: 'red',
-            1: 'green',
-            2: 'blue',
-            3: 'yellow',
-        }
+        self.color_map = colours
+        self.feeling_colors = {feeling: self.color_map.get(i, 'black') 
+                  for i, feeling in enumerate(self.feelings)}
 
     def preprocess_data(self):
         # Compute principal component projections for the differences array
@@ -390,60 +383,62 @@ class KMeansVectorVisualizer:
             self.traj_transitions_dict[heading] = group
 
     def plot_trajectories(self):
-        # Iterate over each trajectory group in the original dataset
+        time_jump = 28  # Original data sampling interval (seconds)
+
         for heading, value in self.traj_transitions_dict_original.items():
-            plt.figure()  # Create a new figure
-            
-            # Define time array for plotting
-            starting_time = 0
-            time_jump = 28
-            time_array = np.arange(starting_time, starting_time + time_jump * value.shape[0], time_jump)
-            
-            # Plot each feeling rating over time
+            fig, ax = plt.subplots()
+            time_array = np.arange(0, time_jump * value.shape[0], time_jump)
+
+            # Plot feeling trajectories
             for feeling in self.feelings:
-                plt.plot(time_array, value[feeling] * 10, label=feeling)
+                ax.plot(time_array, value[feeling] * 10, label=feeling, color=self.feeling_colors[feeling])
+
+            # Add cluster shading if available
+            if heading in self.traj_transitions_dict:
+                traj_group = self.traj_transitions_dict[heading]
+                # Use the original scaling for cluster boundaries:
+                # Each index in traj_group corresponds to time = index * (time_jump * self.no_of_jumps)
+                prev_color_val = traj_group['clust'].iloc[0]
+                start_index = 0
+                for index, color_val in enumerate(traj_group['clust']):
+                    # Check for a change in cluster or if we are at the last point
+                    if color_val != prev_color_val or index == traj_group.shape[0] - 1:
+                        # Compute the end time for the shaded region.
+                        if index != traj_group.shape[0] - 1:
+                            end_time = index * (time_jump * self.no_of_jumps)
+                        else:
+                            end_time = time_array[-1]
+                        start_time = start_index * (time_jump * self.no_of_jumps)
+                        ax.axvspan(start_time, end_time, 
+                                facecolor=self.color_map.get(prev_color_val, 'grey'), alpha=0.3)
+                        start_index = index
+                        prev_color_val = color_val
+
+            # Finalize plot appearance
+            combined = ''.join(map(str, heading)).translate({ord(c): None for c in "\\'() "})
+            ax.set_title(combined)
+            ax.set_xlabel('Time (s)')
+            ax.set_ylabel('Rating')
             
-            # Generate a cleaned title string from the heading tuple
-            combined = ''.join(map(str, heading))
-            cleaned = combined.replace("\\", "").replace("'", "").replace(" ", "").replace("(", "").replace(")", "")
-            
-            plt.title(f'{cleaned}')
-            plt.xlabel('Time')
-            plt.ylabel('Rating')
-            plt.tight_layout()
-            
-            # Colour background regions based on cluster transitions
-            prev_color_val = self.traj_transitions_dict[heading]['clust'].iloc[0]
-            start_index = 0
-            for index, color_val in enumerate(self.traj_transitions_dict[heading]['clust']):
-                if color_val != prev_color_val or index == self.traj_transitions_dict[heading].shape[0] - 1:
-                    # Determine the end index for the coloured region
-                    end_index = index * (time_jump * self.no_of_jumps) if index != self.traj_transitions_dict[heading].shape[0] - 1 else time_array[-1]
-                    
-                    # Highlight cluster regions with transparent coloured bands
-                    plt.axvspan(start_index * (time_jump * self.no_of_jumps), end_index, facecolor=self.color_map[prev_color_val], alpha=0.3)
-                    
-                    # Update start index and previous cluster value
-                    start_index = index
-                    prev_color_val = color_val
-            
-            # Create legend patches for cluster colours
-            cluster_patches = [mpatches.Patch(color=color, label=f'Cluster {cluster}') for cluster, color in self.color_map.items()]
-            handles, labels = plt.gca().get_legend_handles_labels()
+            # Create legend for clusters similar to the reference function
+            cluster_patches = [mpatches.Patch(color=color, label=f'Cluster {cluster}')
+                            for cluster, color in self.color_map.items()]
+            handles, labels = ax.get_legend_handles_labels()
             handles.extend(cluster_patches)
-            labels.extend([f'Cluster {cluster}' for cluster in self.dictionary_clust_labels.values()])
-            
-            # Display legend outside the plot
-            plt.legend(handles=handles, labels=labels, title='Legend', bbox_to_anchor=(1.05, 1), loc='upper left')
-            
+            labels.extend([f'Cluster {label}' for label in self.dictionary_clust_labels.values()])
+            ax.legend(handles=handles, labels=labels, title='Legend', 
+                    bbox_to_anchor=(1.05, 1), loc='upper left')
+
             # Save the plot
-            plt.savefig(self.savelocation_TET + f'K_Vector_stable_cluster_centroids{cleaned}')
-            plt.close()
-    
+            save_path = os.path.join(self.savelocation_TET, f'K_Vector_stable_cluster_centroids{combined}.png')
+            plt.savefig(save_path, bbox_inches='tight')
+            plt.close(fig)
+        
     def run(self):
         # Run the preprocessing and visualization methods
         self.preprocess_data()
         self.plot_trajectories()
+
 
 class JumpAnalysis:
     # Constructor to initialize the class with necessary variables.

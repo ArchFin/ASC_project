@@ -42,20 +42,26 @@ kmeans_clustering_instance = KMeansVectorClustering(
 
 # Call the appropriate methods to get the values you need
 differences_array, dictionary_clust_labels = kmeans_clustering_instance.run()  # Ensure data is processed
-differences_array.to_csv("/Users/a_fin/Desktop/Year 4/Project/Data/VKM_output.csv", index=False)
+
+full_data_with_labels = kmeans_clustering_instance.expand_to_original_shape()
+
+differences_array.to_csv("/Users/a_fin/Desktop/Year 4/Project/Data/VKM_output_differences_array.csv", index=False)
+full_data_with_labels.to_csv("/Users/a_fin/Desktop/Year 4/Project/Data/VKM_output.csv", index=False)
 
 # 1 is 2a, 3 is 2b, 0 is 1 and 1 is 3 this is for clust and clust_name
 # Create an instance of KMeansVisualizer
 visualizer = KMeansVectorVisualizer(
-    filelocation_TET = config['filelocation_TET'], 
+    filelocation_TET = config['filelocation_TET'],
     savelocation_TET = config['savelocation_TET'],
-    differences_array=differences_array, 
-    df_csv_file_original=df_csv_file_original, 
-    dictionary_clust_labels=dictionary_clust_labels, 
-    principal_components=principal_components, 
-    feelings=config['feelings'], 
-    no_of_jumps=config['no_of_jumps']
+    differences_array=differences_array,
+    df_csv_file_original=df_csv_file_original,
+    dictionary_clust_labels=dictionary_clust_labels,
+    principal_components=principal_components,
+    feelings=config['feelings'],
+    no_of_jumps=config['no_of_jumps'],
+    colours = config['colours'],
 ).run()
+
 
 # jump_analysis = JumpAnalysis(
 #     config['filelocation_TET'], 
