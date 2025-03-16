@@ -17,18 +17,24 @@ def compute_entropy(labels):
 # Load VKM data and adjust the 'clust' column by repeating each value 7 times.
 # 3 is 2a (positive stable), 2 is 2b (negative stable), 1 is 3, and 0 is 1.
 df_VKM = pd.read_csv('/Users/a_fin/Desktop/Year 4/Project/Data/VKM_output.csv')
-print("Length of df_VKM:", len(df_VKM))
 
 # VKM the clustering labels
 df_1 = df_VKM['cluster_label']
 
 # Load HMM data
-df_HMM = pd.read_csv('/Users/a_fin/Desktop/Year 4/Project/Data/HMM_output.csv')
+df_HMM = pd.read_csv('/Users/a_fin/Desktop/Year 4/Project/Data/HMM_output_adjusted.csv')
 df_2 = df_HMM['transition_label']
 
+
+# At high iterations cluster 1 is the negative stable and the cluster 2 is the positive stable so 1 to 2 is positive vectorial and 2 to 1 is the negative vectorial
+# k-means the green (1) is the negative stable cluster, the red is the positive vectorial cluster(0), the blue is negative vectorial cluster(2), yellow is positve cluster (3)
 # Re-label the HMM data using the provided mapping dictionary
-mapping = {'2': 3, '1': 2, '2 to 1': 1, '1 to 2': 0}
-df_2 = df_2.replace(mapping)
+# mapping = {'2': 3, '1': 1, '2 to 1': 2, '1 to 2': 0}
+# Triple cluster map
+# mapping = {'2': 3, '1': 1, '2 to 1': 2, '1 to 2': 0}
+# Quadruple cluster mapping
+# df_2 = df_2.replace(mapping)
+
 
 # Print lengths of each label set for validation
 print("Length of df_1:", len(df_1))
@@ -50,11 +56,11 @@ print("Adjusted Mutual Information:", ami)
 # Compute Entropy for Each Label Distribution|
 # -------------------------------------------|
 
-H1 = compute_entropy(df_1.to_numpy())
-H2 = compute_entropy(df_2.to_numpy())
+# H1 = compute_entropy(df_1.to_numpy())
+# H2 = compute_entropy(df_2.to_numpy())
 
-print("Entropy of VKM (df_1):", H1)
-print("Entropy of HMM (df_2):", H2)
+# print("Entropy of VKM (df_1):", H1)
+# print("Entropy of HMM (df_2):", H2)
 
 # -----------------|
 # Additional Notes:|
@@ -65,3 +71,5 @@ print("Entropy of HMM (df_2):", H2)
 # - The entropy values (H1 and H2) indicate the uncertainty or variability in each labeling.
 #   Since MI cannot exceed the minimum entropy of the two systems, comparing these values can provide
 #   insight into the relative predictability and shared information.
+
+

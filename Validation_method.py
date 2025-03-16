@@ -34,7 +34,7 @@ df_kmeans_expanded = kmeans_clustering.expand_to_original_shape()
 kmeans_labels = df_kmeans_expanded['cluster_label'].dropna().astype(int)
 
 # Define HMM repetitions to test
-hmm_repetitions = range(1, 51, 5)
+hmm_repetitions = range(1, 52, 5)
 mi_scores = []
 abrupt_counts = []
 
@@ -52,7 +52,7 @@ for rep in hmm_repetitions:
         no_of_jumps=1  # HMM uses jump=1
     )
     results_array, _, group_transitions = hmm_clustering.run(
-        num_states=2,  # Number of states for HMM
+        num_base_states=2,  # Number of states for HMM
         num_iterations=rep,
         num_repetitions=50
     )
@@ -87,4 +87,4 @@ plt.title('Abrupt Transitions vs HMM Iterations')
 
 plt.tight_layout()
 plt.savefig(config['savelocation_TET'] + 'mutual_info_abrupt_transitions_iterations.png')
-plt.show()
+plt.close()
