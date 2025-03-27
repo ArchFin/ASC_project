@@ -47,11 +47,14 @@ df_TET_feelings_prin_dict = principal_component_finder_instance.PCA_split(split_
 # You might wish to change this if you have a different dataset.
 no_of_jumps = config['no_of_jumps']
 
-clustering = CustomHMMClustering(config['filelocation_TET'], config['savelocation_TET'],
-                                    df_csv_file_original, feelings, principal_components, no_of_jumps)
+transition_contributions = 0.1
 
-results_array, dictionary_clust_labels, transitions = clustering.run(num_base_states=2, num_iterations=20, num_repetitions=10)
+clustering = CustomHMMClustering(config['filelocation_TET'], config['savelocation_TET'],
+                                    df_csv_file_original, feelings, principal_components, no_of_jumps, transition_contributions)
+
+results_array, dictionary_clust_labels, transitions, notransitions = clustering.run(num_base_states=2, num_iterations=30, num_repetitions=25)
 results_array.to_csv("/Users/a_fin/Desktop/Year 4/Project/Data/HMM_output_adjusted.csv", index=False)
+notransitions.to_csv("/Users/a_fin/Desktop/Year 4/Project/Data/HMM_output_adjusted_notransitions.csv", index=False)
 
 
 with open("/Users/a_fin/Desktop/Year 4/Project/Data/HMM_output_transitions.pkl", "wb") as f:

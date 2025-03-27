@@ -15,6 +15,12 @@ from statsmodels.tsa.stattools import acf
 import yaml
 from scipy.spatial.distance import euclidean
 from sklearn.preprocessing import StandardScaler  # Added for standardization
+from scipy.stats import chi2_contingency
+from sklearn.metrics.cluster import normalized_mutual_info_score
+import numpy as np
+import matplotlib.pyplot as plt
+import os
+
 
 # =============================================================================|
 # Configuration via YAML                                                       |
@@ -339,12 +345,85 @@ class KMeansVectorClustering:
         expanded_df['cluster_label'] = expanded_df['cluster_label'].fillna(method='ffill').fillna(method='bfill')
         return expanded_df
 
+    def analyze_category_correlations(self):
+        """
+        Analyze associations between cluster labels and categorical variables using
+        both Cramer's V and Normalized Mutual Information (NMI). Two separate plots
+        are produced: one for Cramer's V and one for NMI.
+        """
+        # Use the differences_array_MI as the basis for analysis.
+        clustered_data = self.differences_array_MI.copy()
+        # For consistency, rename the column to 'labels' if not already present.
+        if 'labels' not in clustered_data.columns:
+            clustered_data['labels'] = clustered_data['labels unnormalised vectors']
+
+        # Define the categorical variables to analyze.
+        categories = ['Subject', 'Week', 'Session']
+        association_results = {}
+        for cat in categories:
+            # Compute contingency table for Cramer's V.
+            contingency = pd.crosstab(clustered_data['labels'], clustered_data[cat])
+            cramers_v = self._compute_cramers_v(contingency)
+            
+            # Compute Normalized Mutual Information (NMI).
+            nmi = normalized_mutual_info_score(clustered_data['labels'], clustered_data[cat])
+            
+            association_results[cat] = {'cramers_v': cramers_v, 'nmi': nmi}
+        
+        # Plot the association strengths on separate plots.
+        self._plot_association_strengths_separate(association_results)
+        
+        return association_results
+
+    def _compute_cramers_v(self, contingency_table):
+        """
+        Calculate Cramer's V statistic for categorical-categorical association.
+        """
+        chi2 = chi2_contingency(contingency_table)[0]
+        n = contingency_table.sum().sum()
+        phi2 = chi2/n
+        r, k = contingency_table.shape
+        phi2corr = max(0, phi2 - ((k-1)*(r-1))/(n-1))
+        r_corr = r - ((r-1)**2)/(n-1)
+        k_corr = k - ((k-1)**2)/(n-1)
+        return np.sqrt(phi2corr / min((k_corr-1), (r_corr-1)))
+
+    def _plot_association_strengths_separate(self, results):
+        """
+        Plot association strengths between clusters and categories using both 
+        Cramer's V and Normalized Mutual Information (NMI) on separate plots.
+        """
+        categories = list(results.keys())
+        cramers_values = [results[cat]['cramers_v'] for cat in categories]
+        nmi_values = [results[cat]['nmi'] for cat in categories]
+        
+        # Plot for Cramer's V.
+        plt.figure(figsize=(10, 6))
+        plt.bar(categories, cramers_values, color='skyblue')
+        plt.title("Association Strength (Cramer's V) Between Clusters and Categories")
+        plt.xlabel("Category")
+        plt.ylabel("Cramer's V")
+        plt.tight_layout()
+        plt.savefig(os.path.join(self.savelocation_TET, 'KMeans_category_association_strengths_cramers.png'))
+        plt.close()
+        
+        # Plot for Normalized Mutual Information.
+        plt.figure(figsize=(10, 6))
+        plt.bar(categories, nmi_values, color='salmon')
+        plt.title("Association Strength (Normalized Mutual Information) Between Clusters and Categories")
+        plt.xlabel("Category")
+        plt.ylabel("Normalized Mutual Information")
+        plt.tight_layout()
+        plt.savefig(os.path.join(self.savelocation_TET, 'KMeans_category_association_strengths_nmi.png'))
+        plt.close()
+
     def run(self):
         self.preprocess_data()
         self.perform_clustering()
         self.plot_results()
         self.plot_cluster_centroids()
         self.stable_cluster_analysis()
+        self.analyze_category_correlations()
         return self.differences_array, self.dictionary_clust_labels
 
 

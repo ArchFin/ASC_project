@@ -24,6 +24,9 @@ from scipy.optimize import linear_sum_assignment
 from collections import defaultdict
 from sklearn.mixture import GaussianMixture
 from scipy.stats import multivariate_normal
+from scipy.stats import chi2_contingency
+from sklearn.metrics.cluster import normalized_mutual_info_score
+
 
 # =============================================================================|
 # Configuration via YAML                                                       |
@@ -181,9 +184,9 @@ class HMMModel:
             # Base states get the k-means centers.
             self.emission_means[:num_base_states] = base_centers
             # Compute an offset based on spread of base centers.
-            offset = 0.1 * (np.max(base_centers, axis=0) - np.min(base_centers, axis=0))
+            offset = 0.2 * (np.max(base_centers, axis=0) - np.min(base_centers, axis=0))
             # Transitional state gets the average plus offset.
-            self.emission_means[-1] = np.mean(base_centers, axis=0) + offset
+            self.emission_means[-1] = np.mean(base_centers, axis=0) - offset 
 
             # Diagonal-dominated initialization for transition probabilities.
             base_prob = 0.8 
@@ -370,7 +373,7 @@ class HMMModel:
         
         return state_seq, log_prob 
 
-    def train(self, data, num_iterations):
+    def train(self, data, num_iterations, transition_contributions):
         for iteration in range(num_iterations):
             print(f"Training iteration {iteration + 1} of {num_iterations}")
             # Gradually relax transition constraints.
@@ -379,9 +382,9 @@ class HMMModel:
             
             # Apply curriculum learning: scale transitions differently for the extra state.
             scaling = np.ones_like(xi)
-            # Reduce contributions for transitions involving the extra state (last index).
-            scaling[-1, :] = transition_constraint * 0.5
-            scaling[:, -1] = transition_constraint * 0.5
+            # Reduce contribution for transitions involving the extra state (last index).
+            scaling[-1, :] = transition_constraint * transition_contributions
+            scaling[:, -1] = transition_constraint * transition_contributions
             constrained_xi = xi * scaling
             
             self.trans_prob = self.update_transition_probabilities(constrained_xi, self.num_states)
@@ -398,7 +401,7 @@ class HMMModel:
 # Custom Clustering Pipeline Using the Transition-State HMM Model              |
 # =============================================================================|
 class CustomHMMClustering:
-    def __init__(self, filelocation_TET, savelocation_TET, df_csv_file_original, feelings, principal_components, no_of_jumps):
+    def __init__(self, filelocation_TET, savelocation_TET, df_csv_file_original, feelings, principal_components, no_of_jumps, transition_contributions):
         self.filelocation_TET = filelocation_TET
         self.savelocation_TET = savelocation_TET
         self.df_csv_file_original = df_csv_file_original
@@ -406,6 +409,7 @@ class CustomHMMClustering:
         self.principal_components = principal_components
         self.no_of_jumps = no_of_jumps
         self.has_week = 'Week' in df_csv_file_original.columns
+        self.transition_contributions = transition_contributions
 
     def preprocess_data(self):
         group_keys = ['Subject', 'Week', 'Session'] if self.has_week else ['Subject', 'Session']
@@ -472,7 +476,7 @@ class CustomHMMClustering:
             random.seed(12345 + rep)
             
             model = HMMModel(num_base_states, num_emissions=num_emissions, data=data_normalized, random_seed=12345 + rep)
-            model.train(data_normalized, num_iterations=num_iterations)
+            model.train(data_normalized, num_iterations=num_iterations, transition_contributions = self.transition_contributions)
             
             state_seq, log_prob = model.decode(data_normalized)
             _, _, fs, log_lik = model.forward_backward(data_normalized)
@@ -510,7 +514,7 @@ class CustomHMMClustering:
 
         self.array['labels'] = avg_state_seq
         self.labels_fin = self.array['labels']
-        self.cluster_centres_fin = avg_emission_means[:num_base_states] * self.std + self.mean
+        self.cluster_centres_fin = avg_emission_means[:num_base_states+1] * self.std + self.mean
         
     def calculate_dictionary_clust_labels(self):
         unique_labels = sorted(self.array['labels'].unique())
@@ -556,7 +560,7 @@ class CustomHMMClustering:
             plt.text(centres_projected[i, 0], centres_projected[i, 1], f'State {i+1}', color=colours[i])
         plt.xlabel("Principal Component 1")
         plt.ylabel("Principal Component 2")
-        plt.title("Base State Centres (Excluding Transition State)")
+        plt.title("Base State Centres")
         plt.tight_layout()
         plt.savefig(self.savelocation_TET + 'state_centres_transition_HMM.png')
         plt.close()
@@ -605,6 +609,7 @@ class CustomHMMClustering:
 
     def analyze_transitions(self, num_base_states, abrupt_gamma_threshold=0.6):
         self.array['transition_label'] = self.array['labels'].apply(lambda x: str(x + 1))
+        self.copy = self.array.copy()
         group_keys = ['Subject', 'Week', 'Session'] if self.has_week else ['Subject', 'Session']
         self.group_transitions = {}
         gamma_columns = [f'gamma_{i}' for i in range(num_base_states + 1)]
@@ -683,13 +688,11 @@ class CustomHMMClustering:
         self.plot_results()
         self._plot_cluster_features()
         self._create_cluster_summary()
-        # Post-process transitional cluster (cluster 3) as per strategy 4.
         self.post_process_cluster_three(cluster_three_label=2, gamma_threshold=0.55)
-        # Adjust num_base_states if needed.
         if num_base_states == 3:
             num_base_states = num_base_states - 1
         self.analyze_transitions(num_base_states)
-        return self.array, self.dictionary_clust_labels, self.group_transitions
+        return self.array, self.dictionary_clust_labels, self.group_transitions, self.copy
 
 # =============================================================================|
 # Visualiser Class for Trajectory Plotting                                     |
