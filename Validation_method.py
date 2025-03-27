@@ -34,7 +34,7 @@ df_kmeans_expanded = kmeans_clustering.expand_to_original_shape()
 kmeans_labels = df_kmeans_expanded['cluster_label'].dropna().astype(int)
 
 # Define HMM repetitions to test
-hmm_repetitions = range(1, 52, 5)
+hmm_repetitions = np.arange(0.1, 1, 0.1)
 mi_scores = []
 abrupt_counts = []
 
@@ -49,12 +49,13 @@ for rep in hmm_repetitions:
         principal_components=principal_component_finder(
             df_csv_file_original, config['feelings'], config['no_dimensions_PCA'], config['savelocation_TET']
         ).PCA_TOT()[0],
-        no_of_jumps=1  # HMM uses jump=1
+        no_of_jumps=1,  # HMM uses jump=1
+        transition_contributions = rep
     )
-    results_array, _, group_transitions = hmm_clustering.run(
+    results_array, _, group_transitions, __ = hmm_clustering.run(
         num_base_states=2,  # Number of states for HMM
-        num_iterations=rep,
-        num_repetitions=50
+        num_iterations=30,
+        num_repetitions=25
     )
     # Extract HMM labels
     hmm_labels = results_array['labels'].astype(int)
@@ -75,16 +76,16 @@ for rep in hmm_repetitions:
 plt.figure(figsize=(10, 5))
 plt.subplot(1, 2, 1)
 plt.plot(hmm_repetitions, mi_scores, 'bo-')
-plt.xlabel('Number of HMM Iteration')
+plt.xlabel('Number of HMM Transition scaling')
 plt.ylabel('Mutual Information')
-plt.title('Mutual Information vs HMM Iterations')
+plt.title('Mutual Information vs HMM Transition scaling')
 
 plt.subplot(1, 2, 2)
 plt.plot(hmm_repetitions, abrupt_counts, 'ro-')
-plt.xlabel('Number of HMM Repetitions')
+plt.xlabel('Number of HMM Transition scaling')
 plt.ylabel('Number of Abrupt Transitions')
-plt.title('Abrupt Transitions vs HMM Iterations')
+plt.title('Abrupt Transitions vs HMM Transition scaling')
 
 plt.tight_layout()
-plt.savefig(config['savelocation_TET'] + 'mutual_info_abrupt_transitions_iterations.png')
+plt.savefig(config['savelocation_TET'] + 'mutual_info_abrupt_transitions_transition_scaling.png')
 plt.close()

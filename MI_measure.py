@@ -22,7 +22,7 @@ df_VKM = pd.read_csv('/Users/a_fin/Desktop/Year 4/Project/Data/VKM_output.csv')
 df_1 = df_VKM['cluster_label']
 
 # Load HMM data
-df_HMM = pd.read_csv('/Users/a_fin/Desktop/Year 4/Project/Data/HMM_output_adjusted.csv')
+df_HMM = pd.read_csv('/Users/a_fin/Desktop/Year 4/Project/Data/HMM_output_adjusted_notransitions.csv')
 df_2 = df_HMM['transition_label']
 
 
