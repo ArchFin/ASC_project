@@ -1,4 +1,5 @@
 import os
+import math
 import pandas as pd
 from concog_dreem_lib import process_wsmi
 
@@ -12,8 +13,8 @@ base_path = "/Users/a_fin/Library/CloudStorage/OneDrive-UniversityofCambridge/Ev
 
 # Define parameters for wSMI (similar to permutation entropy parameters)
 epoch_length = '4secs'
-kernel = 4
-tau = 8
+kernel = 3
+tau = 1
 method_params = {"bypass_csd": True}  # Optional parameters
 
 custom_channel_groups = {
@@ -23,18 +24,14 @@ custom_channel_groups = {
     'glob_chans': list(range(8))
 }
 
-# Create lists to store results from each file processing
-all_wsmi, all_gaps = [], []
-
-# Output path for saving the combined Excel file
-output_path = '/Users/a_fin/Desktop/Year 4/Project/Data/wsmi_metrics_combined.xlsx'
+# List to store results from each file processing
+results_list = []
 
 for subject in subjects:
     for week in weeks:
         for run in runs:
             # Construct folder names and file names based on subject, week, and run.
             week_folder = f"week_{week}"
-            # Naming convention: e.g., s01_wk1_1
             base_filename = f"{subject}_wk{week}_{run}"
             original_file = f"{base_filename}_hp_4sec_labelled_cut.set"
             processed_file = f"{base_filename}_hp_4sec_labelled_cut_reref_rej_epoch.set"
@@ -60,7 +57,7 @@ for subject in subjects:
             )
             
             if wsmi_results is not None:
-                # Retrieve DataFrames for wsmi and gaps
+                # Retrieve DataFrames for wSMI and gaps
                 df_wsmi = wsmi_results['wsmi']
                 df_gaps = wsmi_results['gaps']
                 
@@ -74,21 +71,49 @@ for subject in subjects:
                 df_gaps['run'] = run
                 
                 # Save the results along with metadata
-                all_wsmi.append(df_wsmi)
-                all_gaps.append(df_gaps)
+                results_list.append({
+                    'subject': subject,
+                    'week': week,
+                    'run': run,
+                    'wsmi': df_wsmi,
+                    'gaps': df_gaps
+                })
                 
                 print(f"Processed {subject} week {week} run {run}")
             else:
                 print(f"Processing wSMI failed for {subject} week {week} run {run}")
 
 # After processing, combine and save the results if any processing was successful.
-if all_wsmi:
-    combined_df_wsmi = pd.concat(all_wsmi, ignore_index=True)
-    combined_df_gaps = pd.concat(all_gaps, ignore_index=True)
+if results_list:
+    # Combine all wsmi and gaps DataFrames from the results list
+    combined_df_wsmi = pd.concat([res['wsmi'] for res in results_list], ignore_index=True)
+    combined_df_gaps = pd.concat([res['gaps'] for res in results_list], ignore_index=True)
+    
+    output_path = f'/Users/a_fin/Desktop/Year 4/Project/Data/wsmi_metrics_combined_{tau}.xlsx'
+    MAX_ROWS = 1048575  # Excel maximum number of rows per sheet
     
     with pd.ExcelWriter(output_path) as writer:
-        combined_df_wsmi.to_excel(writer, sheet_name='Measures', index=False)
-        combined_df_gaps.to_excel(writer, sheet_name='Gaps', index=False)
+        # Write combined_df_wsmi in chunks if needed
+        if len(combined_df_wsmi) > MAX_ROWS:
+            num_parts = math.ceil(len(combined_df_wsmi) / MAX_ROWS)
+            for part in range(num_parts):
+                start_index = part * MAX_ROWS
+                end_index = start_index + MAX_ROWS
+                sheet_name = f'Measures_{part+1}'
+                combined_df_wsmi.iloc[start_index:end_index].to_excel(writer, sheet_name=sheet_name, index=False)
+        else:
+            combined_df_wsmi.to_excel(writer, sheet_name='Measures', index=False)
+        
+        # Write combined_df_gaps in chunks if needed
+        if len(combined_df_gaps) > MAX_ROWS:
+            num_parts = math.ceil(len(combined_df_gaps) / MAX_ROWS)
+            for part in range(num_parts):
+                start_index = part * MAX_ROWS
+                end_index = start_index + MAX_ROWS
+                sheet_name = f'Gaps_{part+1}'
+                combined_df_gaps.iloc[start_index:end_index].to_excel(writer, sheet_name=sheet_name, index=False)
+        else:
+            combined_df_gaps.to_excel(writer, sheet_name='Gaps', index=False)
     
     print(f"\nCombined wSMI results have been saved to {output_path}")
 else:

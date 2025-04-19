@@ -18,8 +18,8 @@ custom_channel_groups = {
     'glob_chans': list(range(8))
 }
 
-# Lists to store results from each file processing
-all_psd, all_gaps = [], []
+# List to store results from each file processing
+results_list = []
 
 for subject in subjects:
     for week in weeks:
@@ -41,7 +41,7 @@ for subject in subjects:
             
             print(f"Processing: {base_filename}")
             
-            # Process the file
+            # Process the file using process_psd
             psd_results = process_psd(
                 original_set_path=original_set_path,
                 processed_set_path=processed_set_path,
@@ -50,28 +50,42 @@ for subject in subjects:
             
             # Save results if processing was successful
             if psd_results is not None:
-                # Use base_filename as the participant ID
-                participant_id = base_filename
-                psd_results['measures']['Participant'] = participant_id
-                psd_results['gaps']['Participant'] = participant_id
+                # Retrieve DataFrames for PSD measures and gaps
+                df_psd = psd_results['measures']
+                df_gaps = psd_results['gaps']
                 
-                all_psd.append(psd_results['measures'])
-                all_gaps.append(psd_results['gaps'])
+                # Add metadata columns to help identify the source
+                df_psd['subject'] = subject
+                df_psd['week'] = week
+                df_psd['run'] = run
+
+                df_gaps['subject'] = subject
+                df_gaps['week'] = week
+                df_gaps['run'] = run
+                
+                # Save the results along with metadata in a results list
+                results_list.append({
+                    'Subject': subject,
+                    'Week': week,
+                    'Session': run,
+                    'psd': df_psd,
+                    'gaps': df_gaps
+                })
                 
                 print(f"Processed {subject} week {week} run {run}")
             else:
                 print(f"Processing failed for {base_filename}")
 
 # After processing, combine and save the results if any processing was successful.
-if all_psd:
-    df_psd = pd.concat(all_psd, ignore_index=True)
-    df_gaps = pd.concat(all_gaps, ignore_index=True)
+if results_list:
+    combined_df_psd = pd.concat([res['psd'] for res in results_list], ignore_index=True)
+    combined_df_gaps = pd.concat([res['gaps'] for res in results_list], ignore_index=True)
     
     output_path = '/Users/a_fin/Desktop/Year 4/Project/Data/psd_metrics_combined.xlsx'
     
     with pd.ExcelWriter(output_path) as writer:
-        df_psd.to_excel(writer, sheet_name='PSD', index=False)
-        df_gaps.to_excel(writer, sheet_name='Gaps', index=False)
+        combined_df_psd.to_excel(writer, sheet_name='PSD', index=False)
+        combined_df_gaps.to_excel(writer, sheet_name='Gaps', index=False)
     
     print(f"\nCombined results have been saved to {output_path}")
 else:

@@ -12,8 +12,8 @@ base_path = "/Users/a_fin/Library/CloudStorage/OneDrive-UniversityofCambridge/Ev
 
 # Define parameters for permutation entropy
 epoch_length = '4secs'
-kernel = 4
-tau = 8
+kernel = 3
+tau = 1
 
 custom_channel_groups = {
     'fo_chans': [0, 1, 4, 5],
@@ -70,9 +70,9 @@ for subject in subjects:
                 
                 # Save the results along with metadata
                 results_list.append({
-                    'subject': subject,
-                    'week': week,
-                    'run': run,
+                    'Subject': subject,
+                    'Week': week,
+                    'Session': run,
                     'pe': df_pe,
                     'gaps': df_gaps
                 })
@@ -87,7 +87,7 @@ if results_list:
     combined_df_pe = pd.concat([res['pe'] for res in results_list], ignore_index=True)
     combined_df_gaps = pd.concat([res['gaps'] for res in results_list], ignore_index=True)
     
-    output_path = '/Users/a_fin/Desktop/Year 4/Project/Data/pe_metrics_combined.xlsx'
+    output_path = f'/Users/a_fin/Desktop/Year 4/Project/Data/pe_metrics_combined_{tau}.xlsx'
     
     with pd.ExcelWriter(output_path) as writer:
         combined_df_pe.to_excel(writer, sheet_name='PermutationEntropy', index=False)

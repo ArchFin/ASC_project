@@ -2,9 +2,6 @@ import os
 import pandas as pd
 from concog_dreem_lib import process_LZ78
 
-import os
-import pandas as pd
-
 # List of subjects, weeks, and runs to process
 subjects = ['s01', 's02', 's03', 's04', 's07', 's08', 's11', 's13', 's14', 's17', 's18', 's19', 's21']
 weeks = [1, 2, 3, 4]
@@ -57,16 +54,17 @@ for subject in subjects:
                 df_lzsum = lz_results['lz_sum']
                 df_gaps = lz_results['gaps']
                 
-                # Optionally add metadata columns to help identify the source
-                df_lzc['subject'] = subject
-                df_lzc['week'] = week
-                df_lzc['run'] = run
+                # Add metadata columns to help identify the source
+                for df in [df_lzc, df_lzsum, df_gaps]:
+                    df['subject'] = subject
+                    df['week'] = week
+                    df['run'] = run
                 
                 # Save the results along with metadata
                 results_list.append({
-                    'subject': subject,
-                    'week': week,
-                    'run': run,
+                    'Subject': subject,
+                    'Week': week,
+                    'Session': run,
                     'lz_c': df_lzc,
                     'lz_sum': df_lzsum,
                     'gaps': df_gaps
