@@ -97,7 +97,7 @@ class principal_component_finder:
         """
 
         # Project STANDARDIZED DATA 
-        df_TET_feelings_prin = pd.DataFrame(self.scaled_data @ self.principal_components.T,  # <-- KEY FIX
+        df_TET_feelings_prin = pd.DataFrame(self.scaled_data @ self.principal_components.T,  
                                             columns=[f"PC{i+1}" for i in range(self.no_dimensions)])
 
         # Plot bar charts for each principal component.
@@ -132,7 +132,7 @@ class principal_component_finder:
         plt.xticks(rotation=45)
         plt.tight_layout()
         plt.savefig(os.path.join(self.savelocation, 'explained_variance_ratio.png'))
-        plt.close()
+        plt.close() 
 
         return self.principal_components, self.explained_variance_ratio, df_TET_feelings_prin
 
