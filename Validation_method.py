@@ -3,7 +3,7 @@ import pandas as pd
 from sklearn.metrics import mutual_info_score
 import matplotlib.pyplot as plt
 import yaml
-from HMM.HMM_methods_copy import csv_splitter, principal_component_finder, CustomHMMClustering
+from HMM.HMM_methods import csv_splitter, principal_component_finder, CustomHMMClustering
 
 from Vectorised_Kmeans.Max_kmeans_methods import csv_splitter, principal_component_finder, KMeansVectorClustering, KMeansVectorVisualizer, JumpAnalysis
 

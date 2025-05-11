@@ -5,7 +5,7 @@ import numpy as np
 import yaml
 import csv
 import json
-from HMM.HMM_methods_copy import csv_splitter, principal_component_finder, CustomHMMClustering, HMMModel, Visualiser
+from HMM.HMM_methods import csv_splitter, principal_component_finder, CustomHMMClustering, HMMModel, Visualiser
 from Vectorised_Kmeans.Max_kmeans_methods import KMeansVectorClustering, KMeansVectorVisualizer
 import os  # Added for path handling
 from sklearn.decomposition import PCA
