@@ -46,7 +46,7 @@ if __name__ == "__main__":
     # --- 1) Load your data ---
     # Replace the path with your actual Excel file location
     df = pd.read_excel(
-        '/Users/a_fin/Desktop/Year 4/Project/Data/pe_metrics_combined_8.xlsx'
+        '/Users/a_fin/Desktop/Year 4/Project/Data/pe_metrics_combined_1.xlsx'
     )
 
     # --- 2) Pivot, keeping all duplicates ---
@@ -61,7 +61,7 @@ if __name__ == "__main__":
     # --- 4) Save the result ---
     output_path = (
         '/Users/a_fin/Desktop/Year 4/Project/Data/'
-        'pe_metrics_combined_8_wide.xlsx'
+        'pe_metrics_combined_1_wide.xlsx'
     )
     wide.to_excel(output_path, index=False)
 

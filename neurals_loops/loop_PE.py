@@ -3,7 +3,7 @@ import pandas as pd
 from concog_dreem_lib import process_permutation_entropy  # Import function for permutation entropy
 
 # List of subjects, weeks, and runs to process
-subjects = ['s01', 's02', 's03', 's04', 's07', 's08', 's11', 's13', 's14', 's17', 's18', 's19', 's21']
+subjects = ['s01', 's02', 's03', 's04', 's07', 's08', 's13', 's14', 's17', 's18', 's19', 's21']
 weeks = [1, 2, 3, 4]
 runs = [1, 2, 3, 4, 5, 6, 7]
 
@@ -13,7 +13,7 @@ base_path = "/Users/a_fin/Library/CloudStorage/OneDrive-UniversityofCambridge/Ev
 # Define parameters for permutation entropy
 epoch_length = '4secs'
 kernel = 3
-tau = 1
+tau = 8
 
 custom_channel_groups = {
     'fo_chans': [0, 1, 4, 5],

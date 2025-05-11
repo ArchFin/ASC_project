@@ -7,12 +7,7 @@ data_1 = pd.read_csv(file_path_1)[['subject', 'week', 'run', 'number', 'transiti
 file_path_2 = '/Users/a_fin/Desktop/Year 4/Project/Data/averaged_neurals.csv'
 data_2 = pd.read_csv(file_path_2)
 
-# Clean and format the merging columns in data_1
-data_1['subject'] = data_1['subject'].str.rstrip('\\')  # Remove trailing backslash
-data_1['week'] = data_1['week'].str.extract(r'(\d+)', expand=False)  # Extract number from 'week_#'
-data_1['run'] = data_1['run'].str.extract(r'(\d+)', expand=False).str.lstrip('0')  # Extract number and remove leading zero
-
-# Convert to strings for consistency
+# Convert the merging columns to strings to ensure consistency
 for col in ['subject', 'week', 'run', 'number']:
     data_1[col] = data_1[col].astype(str)
     data_2[col] = data_2[col].astype(str)
