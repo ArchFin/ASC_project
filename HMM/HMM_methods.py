@@ -681,6 +681,105 @@ class CustomHMMClustering:
         threshold = mean_change + 0.05 * std_change
         return threshold
 
+    def plot_state_sequence(self):
+        """
+        Plots the state (cluster) assignment over time for the full dataset and saves the plot.
+        """
+        plt.figure(figsize=(12, 2))
+        plt.plot(self.array['number'], self.array['labels'], drawstyle='steps-post', lw=1)
+        plt.xlabel('Time Index')
+        plt.ylabel('State')
+        plt.title('State Sequence Over Time')
+        plt.tight_layout()
+        plt.savefig(os.path.join(self.savelocation_TET, 'state_sequence_over_time.png'))
+        plt.close()
+
+    def plot_gamma_heatmap(self):
+        """
+        Plots a heatmap of gamma (state membership probabilities) over time.
+        """
+        gamma_cols = [col for col in self.array.columns if col.startswith('gamma_')]
+        if not gamma_cols:
+            return
+        plt.figure(figsize=(12, 4))
+        sns.heatmap(self.array[gamma_cols].T, cmap='viridis', cbar=True)
+        plt.xlabel('Time Index')
+        plt.ylabel('State')
+        plt.title('State Membership Probabilities (Gamma)')
+        plt.tight_layout()
+        plt.savefig(os.path.join(self.savelocation_TET, 'gamma_heatmap.png'))
+        plt.close()
+
+    def plot_transition_matrix(self):
+        """
+        Plots the average transition probability matrix as a heatmap.
+        """
+        if hasattr(self, 'avg_fs') and hasattr(self, 'labels_fin') and hasattr(self, 'cluster_centres_fin'):
+            # Try to get avg_trans_prob from perform_clustering scope
+            num_states = self.cluster_centres_fin.shape[0]
+            # Recompute transition matrix from labels
+            trans_mat = np.zeros((num_states, num_states))
+            labels = self.labels_fin.values if hasattr(self.labels_fin, 'values') else self.labels_fin
+            for i in range(len(labels)-1):
+                trans_mat[labels[i], labels[i+1]] += 1
+            row_sums = trans_mat.sum(axis=1, keepdims=True)
+            row_sums[row_sums == 0] = 1
+            trans_mat = trans_mat / row_sums
+            plt.figure(figsize=(6, 5))
+            sns.heatmap(trans_mat, annot=True, fmt=".2f", cmap='Blues')
+            plt.xlabel('To State')
+            plt.ylabel('From State')
+            plt.title('Empirical Transition Probability Matrix')
+            plt.tight_layout()
+            plt.savefig(os.path.join(self.savelocation_TET, 'transition_matrix_heatmap.png'))
+            plt.close()
+
+    def plot_state_duration_distribution(self):
+        """
+        Plots a histogram of state durations (how long each state persists).
+        """
+        labels = self.array['labels'].values
+        durations = []
+        current = labels[0]
+        count = 1
+        for l in labels[1:]:
+            if l == current:
+                count += 1
+            else:
+                durations.append((current, count))
+                current = l
+                count = 1
+        durations.append((current, count))
+        durations = pd.DataFrame(durations, columns=['state', 'duration'])
+        plt.figure(figsize=(8, 4))
+        for state in durations['state'].unique():
+            plt.hist(durations[durations['state']==state]['duration'], bins=20, alpha=0.6, label=f'State {state+1}')
+        plt.xlabel('Duration (consecutive time points)')
+        plt.ylabel('Count')
+        plt.title('State Duration Distribution')
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(os.path.join(self.savelocation_TET, 'state_duration_distribution.png'))
+        plt.close()
+
+    def validate_middle_state(self):
+        """
+        Checks if the dominant cluster is the one with the smallest L2 norm (middle state validation).
+        Saves the result to a text file for traceability.
+        """
+        labels = self.array['labels'].values
+        unique, counts = np.unique(labels, return_counts=True)
+        dominant_cluster = unique[np.argmax(counts)]
+        emission_means = self.cluster_centres_fin
+        magnitudes = [np.linalg.norm(emission_means[i]) for i in range(emission_means.shape[0])]
+        smallest_magnitude_state = np.argmin(magnitudes)
+        result = (dominant_cluster == smallest_magnitude_state)
+        msg = f"Dominant cluster: {dominant_cluster}, Smallest L2 norm cluster: {smallest_magnitude_state}, Match: {result}\n"
+        print(msg)
+        # Save to file
+        with open(os.path.join(self.savelocation_TET, 'middle_state_validation.txt'), 'w') as f:
+            f.write(msg)
+
     def run(self, num_base_states, num_iterations, num_repetitions):
         self.preprocess_data()
         self.perform_clustering(num_base_states, num_iterations, num_repetitions)
@@ -692,6 +791,13 @@ class CustomHMMClustering:
         if num_base_states == 3:
             num_base_states = num_base_states - 1
         self.analyze_transitions(num_base_states)
+        # --- Added best-practice visualizations ---
+        self.plot_state_sequence()
+        self.plot_gamma_heatmap()
+        self.plot_transition_matrix()
+        self.plot_state_duration_distribution()
+        # -----------------------------------------
+        self.validate_middle_state()
         return self.array, self.dictionary_clust_labels, self.group_transitions, self.copy
 
 # =============================================================================|

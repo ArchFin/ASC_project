@@ -22,7 +22,7 @@ import pickle
 with open("Breathwork.yaml", "r") as file:
     config = yaml.safe_load(file)  # Converts YAML to a Python dictionary
 
-from HMM.HMM_methods import csv_splitter, principal_component_finder, CustomHMMClustering, Visualiser, HMMJumpAnalysis
+from HMM_methods import csv_splitter, principal_component_finder, CustomHMMClustering, Visualiser, HMMJumpAnalysis
 
 # Read the CSV file using the configuration from YAML.
 csv_splitter_instance = csv_splitter(config['filelocation_TET'])
