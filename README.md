@@ -43,7 +43,7 @@ A HMM is a statistical model that describes a system assumed to be a Markov proc
 - **Trajectory Plots:** Feeling time-courses with cluster/state shading and transition annotations.
 - **Middle State Validation:** Checks if the dominant cluster matches the "neutral" state (smallest L2 norm).
 
-### 5. Transition and Jump Analysis
+### 5. Transition and (Relic) Jump Analysis
 - **Transition Annotation:** Each transition is classified as abrupt or gradual based on gamma slope.
 - **Transition Metadata:** CSV output with timing, type, and condition frequencies before/during/after transitions.
 - **Jump Analysis:**
@@ -58,7 +58,7 @@ A HMM is a statistical model that describes a system assumed to be a Markov proc
 - **Text files:** Middle state validation results, cluster summaries.
 
 ## How to Run
-1. **Configure** your settings in `Breathwork.yaml` (file paths, feelings, PCA dimensions, etc).
+1. **Configure** your settings in the linked yaml file. Example is Breathwork.yaml.
 2. **Run** the main script:
    ```bash
    python HMM.py
@@ -91,5 +91,5 @@ A HMM is a statistical model that describes a system assumed to be a Markov proc
 - For PCA: [Wikipedia - Principal Component Analysis](https://en.wikipedia.org/wiki/Principal_component_analysis)
 
 ---
-For questions or contributions, please contact the project maintainer.
+For questions or contributions, archie.finney@yahoo.co.uk
 
