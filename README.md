@@ -82,6 +82,8 @@ A HMM is a statistical model that describes a system assumed to be a Markov proc
 - `HMM_methods.py`: All core methods and classes for the pipeline.
 - `HMM.py`: Main script to initialize and run the pipeline.
 - `Breathwork.yaml`: Configuration file for paths, features, and parameters.
+- `loop_etc.py`: Contains utility functions for looping over datasets, batch processing, or running repeated analyses (e.g., across subjects or sessions).
+- `interative_etc.py`: Provides tools for interactive exploration, such as stepwise model fitting, parameter tuning, or interactive data visualization.
 - `README.md`: This guide.
 - Output files: PNGs, CSVs, pickles, and text files in the output directory.
 

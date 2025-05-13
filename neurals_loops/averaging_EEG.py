@@ -1,7 +1,7 @@
 import pandas as pd
 
 # Load the uploaded CSV files
-file_path_1 = '/Users/a_fin/Desktop/Year 4/Project/Data/HMM_output_adjusted_notransitions_2.csv'
+file_path_1 = '/Users/a_fin/Desktop/Year 4/Project/Data/HMM_output_adjusted_notransitions_numbered.csv'
 data_1 = pd.read_csv(file_path_1)[['subject', 'week', 'run', 'number', 'transition_label']]
 
 file_path_2 = '/Users/a_fin/Desktop/Year 4/Project/Data/averaged_neurals.csv'
