@@ -189,7 +189,7 @@ class HMMModel:
             self.emission_means[-1] = np.mean(base_centers, axis=0) - offset 
 
             # Diagonal-dominated initialization for transition probabilities.
-            base_prob = 0.8 
+            base_prob = 0.6
             self.trans_prob = np.eye(self.num_states) * base_prob + \
                               np.ones((self.num_states, self.num_states)) * (1 - base_prob) / (self.num_states - 1)
             self.trans_prob /= self.trans_prob.sum(axis=1, keepdims=True)
