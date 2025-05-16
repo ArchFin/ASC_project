@@ -60,17 +60,11 @@ def select_features(X, pattern_keep=None):
 def clean_impute(X, threshold=2.5):
     mask_allnan = X.isna().all(axis=1)
     X = X[~mask_allnan]
-    for col in X.columns:
-        mu, sigma = X[col].mean(), X[col].std()
-        X[col] = np.where(
-            np.abs(X[col] - mu) <= threshold * sigma,
-            X[col],
-            np.nan
-        )
-    X = X.fillna(method='ffill').fillna(method='bfill')
-    X = X.dropna(axis=0)
+    mu = X.mean()
+    sigma = X.std()
+    X = X.where(np.abs(X - mu) <= threshold * sigma)
+    X = X.fillna(method='ffill').fillna(method='bfill').dropna()
     return X
-
 
 def preprocess(X, y, test_size=0.2, random_state=42):
     X_clean = clean_impute(X)
@@ -93,14 +87,18 @@ def build_model(input_dim, num_classes, hp=None):
         units = hp.Int('units', 32, 256, step=32)
         lr = hp.Float('lr', 1e-4, 1e-2, sampling='log')
         activation = hp.Choice('activation', ['relu', 'tanh'])
+        dropout_rate = hp.Float('dropout_rate', 0.2, 0.6, step=0.1)
     else:
-        units, lr, activation = 64, 1e-3, 'relu'
+        units, lr, activation, dropout_rate = 64, 1e-3, 'relu', 0.5
 
     model = Sequential([
         Input(shape=(input_dim,)),
         Dense(units, activation=activation, kernel_regularizer=l2(1e-3)),
         BatchNormalization(),
-        Dropout(0.5),
+        Dropout(dropout_rate),
+        Dense(units // 2, activation=activation, kernel_regularizer=l2(1e-3)),  # Added extra layer
+        BatchNormalization(),
+        Dropout(dropout_rate/2),
         Dense(num_classes, activation='softmax')
     ])
     model.compile(
@@ -156,6 +154,14 @@ def train_and_evaluate(X_train, Y_train, X_test, Y_test, label_names,
     preds = probs.argmax(axis=1)
     true = Y_test.argmax(axis=1)
 
+    # Print counts of true and predicted labels
+    print('True label counts in test set:', pd.Series(true).value_counts())
+    print('Predicted label counts:', pd.Series(preds).value_counts())
+    # Warn if any class is missing from predictions
+    missing_pred = set(range(len(label_names))) - set(np.unique(preds))
+    if missing_pred:
+        print(f"Warning: The following classes were never predicted: {missing_pred}")
+
     # Confusion matrix (normalized to percentages)
     cm = confusion_matrix(true, preds)
     cm_percent = cm.astype('float') / cm.sum(axis=1, keepdims=True) * 100
@@ -203,19 +209,29 @@ def train_and_evaluate(X_train, Y_train, X_test, Y_test, label_names,
 
     return model, aucs, cm
 
-def analyze_cluster_averages(X, model, label_names, out_dir=f'/Users/a_fin/Desktop/Year 4/Project/Data/'):
+def analyze_cluster_averages(X, model, label_names, le=None, out_dir=f'/Users/a_fin/Desktop/Year 4/Project/Data/'):
     # Ensure X is a DataFrame with original feature names
     if not isinstance(X, pd.DataFrame):
         raise ValueError("X must be a pandas DataFrame with original feature names.")
     
     preds = model.predict(X.values).argmax(axis=1)
     X_clustered = X.copy()
-    # Use label_names for cluster labels
-    X_clustered['Cluster'] = [label_names[p] if p < len(label_names) else f'Cluster_{p}' for p in preds]
+    # Diagnostic: print unique predicted indices and cluster labels
+    print('Unique predicted indices:', np.unique(preds))
+    if le is not None:
+        cluster_labels = le.inverse_transform(preds)
+        print('Unique cluster labels (original):', np.unique(cluster_labels))
+        X_clustered['Cluster'] = cluster_labels
+    else:
+        X_clustered['Cluster'] = preds
 
-    cluster_averages = X_clustered.groupby('Cluster').mean()
-    cluster_medians = X_clustered.groupby('Cluster').median()
-    cluster_std = X_clustered.groupby('Cluster').std()
+    # Diagnostic: print cluster counts before plotting
+    print('Cluster counts in X_clustered:')
+    print(X_clustered['Cluster'].value_counts())
+
+    cluster_averages = X_clustered.groupby('Cluster').mean().sort_index()
+    cluster_medians = X_clustered.groupby('Cluster').median().sort_index()
+    cluster_std = X_clustered.groupby('Cluster').std().sort_index()
 
     print("\nCluster Averages:\n", cluster_averages)
     print("\nCluster Medians:\n", cluster_medians)
@@ -353,6 +369,73 @@ def analyze_cluster_averages(X, model, label_names, out_dir=f'/Users/a_fin/Deskt
 
     return cluster_averages, cluster_medians, cluster_std
 
+
+def evaluate_and_save(model, X_test, Y_test, label_names, out_dir='results'):
+    """
+    Given a *trained* model, compute preds on X_test, then
+    1) print the confusion-matrix (counts + %)
+    2) plot & save the CM figure
+    3) compute, print and save the AUC bar chart
+    """
+    import os
+    from sklearn.metrics import confusion_matrix, roc_auc_score
+    import numpy as np
+    import matplotlib.pyplot as plt
+
+    os.makedirs(out_dir, exist_ok=True)
+
+    # 1) predictions
+    probs = model.predict(X_test)
+    preds = probs.argmax(axis=1)
+    true  = Y_test.argmax(axis=1)
+
+    # 2) confusion matrix (counts + percent)
+    cm = confusion_matrix(true, preds)
+    cm_pct = cm.astype(float) / cm.sum(axis=1, keepdims=True) * 100
+
+    # --- print to console ---
+    print("Confusion Matrix (counts):\n", cm)
+    print("Confusion Matrix (percentages):\n", np.round(cm_pct, 2))
+
+    # --- now plot & save figure ---
+    plt.figure(figsize=(6,5))
+    plt.imshow(cm_pct, cmap=plt.cm.Blues, vmin=0, vmax=100)
+    plt.title('Confusion Matrix (%)')
+    plt.colorbar(label='Percentage')
+    ticks = range(len(label_names))
+    plt.xticks(ticks, label_names, rotation=45)
+    plt.yticks(ticks, label_names)
+    plt.xlabel('Predicted')
+    plt.ylabel('True')
+    for i in ticks:
+        for j in ticks:
+            plt.text(j, i, f"{cm_pct[i,j]:.1f}%", ha='center', va='center')
+    plt.tight_layout()
+    cm_path = os.path.join(out_dir, 'confusion_matrix.png')
+    plt.savefig(cm_path)
+    plt.close()
+    print(f"Saved confusion matrix figure → {cm_path}")
+
+    # 3) AUC per class
+    aucs = {
+        str(label): roc_auc_score((true == i).astype(int), probs[:, i])
+        for i, label in enumerate(label_names)
+    }
+    print("AUC per class:", aucs)
+
+    plt.figure(figsize=(6,4))
+    plt.bar(list(aucs.keys()), list(aucs.values()))
+    plt.title('One-vs-Rest AUC')
+    plt.ylabel('AUC')
+    plt.ylim(0,1)
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    auc_path = os.path.join(out_dir, 'auc_per_class.png')
+    plt.savefig(auc_path)
+    plt.close()
+    print(f"Saved AUC bar chart → {auc_path}")
+
+    return cm, aucs
 def main():
     csv_path = '/Users/a_fin/Desktop/Year 4/Project/Data/neural_data_complete_2.csv'
     drop_cols = ['subject', 'week', 'run', 'epoch', 'number']
@@ -371,11 +454,12 @@ def main():
     X['psd global delta '] = X['psd_metrics_combined_avg__Delta_Power_glob_chans']
     X['psd global alpha '] = X['psd_metrics_combined_avg__Alpha_Power_glob_chans']
     X['wSMI 1 global'] = X['wsmi_1_global_2__wSMI_glob_chans']
-    X['LZC global'] = X['lz_metrics_combined__glob_chans']
-    X['SMI 1 global'] = X['wsmi_1_global_2__SMI_glob_chans']
-    X['SMI 2 global'] = X['wsmi_2_global_2__SMI_glob_chans']
-    X['SMI 8 global'] = X['wsmi_8_global_2__SMI_glob_chans']
-    X['SMI 4 global'] = X['wsmi_4_global_2__SMI_glob_chans']
+    X['LZC global'] = X['lz_metrics_combined_LZc__glob_chans']
+    X['LZsum global'] = X['lz_metrics_combined_LZsum__glob_chans']
+    # X['SMI 1 global'] = X['wsmi_1_global_2__SMI_glob_chans']
+    # X['SMI 2 global'] = X['wsmi_2_global_2__SMI_glob_chans']
+    # X['SMI 8 global'] = X['wsmi_8_global_2__SMI_glob_chans']
+    # X['SMI 4 global'] = X['wsmi_4_global_2__SMI_glob_chans']
     X['psd global theta '] = X['psd_metrics_combined_avg__Theta_Power_glob_chans']
     X['pe 2 global'] = X['pe_metrics_combined_2_wide__glob_chans']
     X['pe 1 global'] = X['pe_metrics_combined_1_wide__glob_chans']
@@ -385,17 +469,65 @@ def main():
 
     X_train, X_test, Y_train, Y_test, le, label_names = preprocess(X, y)
 
-    model, aucs, cm = train_and_evaluate(
-        X_train, Y_train, X_test, Y_test,
-        label_names=label_names,
-        out_dir='/Users/a_fin/Desktop/Year 4/Project/Data'
+
+    # Compute class weights for imbalanced data
+    from sklearn.utils.class_weight import compute_class_weight
+    import numpy as np
+    y_train_labels = np.argmax(Y_train, axis=1)
+    class_weights = compute_class_weight('balanced', classes=np.unique(y_train_labels), y=y_train_labels)
+    class_weights = {i: w for i, w in enumerate(class_weights)}
+
+    # Use hyperparameter tuning for best model
+    # Split a validation set from training
+    from sklearn.model_selection import train_test_split
+    X_tr, X_val, Y_tr, Y_val = train_test_split(X_train, Y_train, test_size=0.3, random_state=42, stratify=y_train_labels)
+    best_model, best_hp = tune_hyperparameters(X_tr, Y_tr, X_val, Y_val)
+
+    # === 3) Retrain best model on full train set ===
+    callbacks = [
+        EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True),
+        ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=3)
+    ]
+    best_model.fit(
+        X_train, Y_train,
+        epochs=250,
+        batch_size=256,
+        validation_data=(X_test, Y_test),
+        callbacks=callbacks,
+        class_weight=class_weights,
+        verbose=1
     )
 
-    cluster_averages, cluster_medians, cluster_std = analyze_cluster_averages(X, model, label_names)
+    # === 4) Evaluate & save CM+AUC on the tuned model ===
+    cm, aucs = evaluate_and_save(
+        best_model,
+        X_test, Y_test,
+        label_names,
+        out_dir= f'/Users/a_fin/Desktop/Year 4/Project/Data/'
+    )
 
-    model.save('neural_decoder_model.h5')
+    # === 5) Cluster analysis on full dataset ===
+    # re‐scale on the *entire* cleaned dataset
+    scaler = StandardScaler()
+    X_clean = clean_impute(X)
+    scaler.fit(X_clean)
+    X_scaled = pd.DataFrame(
+        scaler.transform(X_clean),
+        columns=X_clean.columns, index=X_clean.index
+    )
+    analyze_cluster_averages(
+        X_scaled,
+        best_model,
+        label_names,
+        le=le,
+        out_dir=f'/Users/a_fin/Desktop/Year 4/Project/Data/'
+    )
+
+    # === 6) Save model & encoder ===
+    best_model.save('neural_decoder_model.h5')
     joblib.dump(le, 'label_encoder.pkl')
-    print('Saved model to neural_decoder_model.h5 and encoder to label_encoder.pkl')
+    print('Saved tuned model → neural_decoder_model.h5')
+    print('Saved label encoder → label_encoder.pkl')
 
 
 if __name__ == '__main__':
