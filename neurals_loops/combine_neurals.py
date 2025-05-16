@@ -7,6 +7,23 @@ def merge_excel_files(file_paths, output_csv,
                       how='outer'):
     dfs = []
     for fp in file_paths:
+        # Special handling for lz_metrics_combined.xlsx with two sheets
+        if os.path.basename(fp) == 'lz_metrics_combined.xlsx':
+            sheet_names = ['LZc', 'LZsum']  # <-- Change these to your actual sheet names
+            for sheet in sheet_names:
+                try:
+                    df = pd.read_excel(fp, sheet_name=sheet, engine='openpyxl')
+                except Exception as e:
+                    print(f"Error reading {fp} [{sheet}]: {e}")
+                    continue
+                basename = f"{os.path.splitext(os.path.basename(fp))[0]}_{sheet}"
+                other_cols = [c for c in df.columns if c not in key_cols]
+                rename_map = {c: f"{basename}__{c}" for c in other_cols}
+                df = df.rename(columns=rename_map)
+                dfs.append(df)
+                print(f"Loaded {fp} [{sheet}] ({df.shape[0]} rows, {df.shape[1]} cols)")
+            continue  # Skip the rest of the loop for this file
+
         if not os.path.isfile(fp):
             print(f"⚠️  File not found: {fp}")
             continue

@@ -4,7 +4,7 @@ import pandas as pd
 file_path_1 = '/Users/a_fin/Desktop/Year 4/Project/Data/HMM_output_adjusted_notransitions_numbered.csv'
 data_1 = pd.read_csv(file_path_1)[['subject', 'week', 'run', 'number', 'transition_label']]
 
-file_path_2 = '/Users/a_fin/Desktop/Year 4/Project/Data/averaged_neurals.csv'
+file_path_2 = '/Users/a_fin/Desktop/Year 4/Project/Data/averaged_neurals_2.csv'
 data_2 = pd.read_csv(file_path_2)
 
 # Convert the merging columns to strings to ensure consistency
