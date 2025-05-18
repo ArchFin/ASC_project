@@ -23,7 +23,6 @@ print(f"Version info: {sys.version_info}")
 import argparse
 import pandas as pd
 import numpy as np
-import keras._tf_keras.keras.models
 from sklearn.model_selection import train_test_split, KFold
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.metrics import roc_auc_score, confusion_matrix

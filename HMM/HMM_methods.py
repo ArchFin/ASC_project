@@ -871,6 +871,20 @@ class Visualiser:
         """Main plotting function with transition visualization"""
         time_jump = 28  # Original data sampling interval (seconds)
 
+        def format_heading(heading):
+            if isinstance(heading, tuple):
+                # Try to detect common heading tuple patterns
+                if len(heading) == 3:
+                    subj, week, session = heading
+                    return f"{subj} week {week} run {str(session).zfill(2)}"
+                elif len(heading) == 2:
+                    subj, session = heading
+                    return f"{subj} run {str(session).zfill(2)}"
+                else:
+                    return ' '.join(str(h) for h in heading)
+            else:
+                return str(heading)
+
         for heading, value in self.traj_transitions_dict_original.items():
             fig, ax = plt.subplots()
             time_array = np.arange(0, time_jump*value.shape[0], time_jump)
@@ -901,9 +915,8 @@ class Visualiser:
                 self.annotate_conditions(ax, time_array, value)
 
             # Finalize plot
-            combined = ''.join(map(str, heading)).translate(
-                {ord(c): None for c in "\\'() "})
-            ax.set_title(combined)
+            formatted_title = format_heading(heading)
+            ax.set_title(formatted_title)
             ax.set_xlabel('Time (s)')
             ax.set_ylabel('Rating')
             
@@ -918,6 +931,8 @@ class Visualiser:
                      bbox_to_anchor=(1.05, 1), loc='upper left')
 
             # Save plot
+            combined = ''.join(map(str, heading)).translate(
+                {ord(c): None for c in "\\'() "})
             save_path = os.path.join(self.savelocation_TET, 
                                     f'HMM_stable_cluster_centroids{combined}.png')
             plt.savefig(save_path, bbox_inches='tight')
