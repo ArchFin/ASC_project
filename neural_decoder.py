@@ -21,9 +21,11 @@ import sys
 print(f"Python executable: {sys.executable}")
 print(f"Version info: {sys.version_info}")
 
-import argparse
-import pandas as pd
+from sklearn.inspection import permutation_importance
+import shap
+import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 
 # Scikit-learn utilities for splitting, scaling, encoding labels, and metrics
 from sklearn.model_selection import train_test_split, KFold
@@ -520,7 +522,7 @@ def evaluate_and_save(model, X_test, Y_test, label_names, out_dir='results'):
     # Plot & save confusion matrix (%)
     plt.figure(figsize=(6, 5))
     plt.imshow(cm_pct, cmap=plt.cm.Blues, vmin=0, vmax=100)
-    plt.title('Confusion Matrix (%)')
+    plt.title('Confusion Matrix of MLP-C True label vs Predicted label (%)')
     plt.colorbar(label='Percentage')
     ticks = range(len(label_names))
     plt.xticks(ticks, label_names, rotation=45)
@@ -654,8 +656,157 @@ def main():
         out_dir=f'/Users/a_fin/Desktop/Year 4/Project/Data/'
     )
 
+    # —————————————————————————————— 8.5 MANUAL PERMUTATION‐IMPORTANCE ——————————————————————————————
+
+    # Compute baseline accuracy on X_test once (no shuffling).
+    # 1) True labels as integers 0…(num_classes−1)
+    y_test_labels = Y_test.argmax(axis=1)
+
+    # 2) Baseline predictions & accuracy
+    probs_baseline = best_model.predict(X_test)
+    preds_baseline = probs_baseline.argmax(axis=1)
+    baseline_acc = (preds_baseline == y_test_labels).mean()
+    print(f"Baseline test accuracy (no shuffling): {baseline_acc:.4f}")
+
+    # 3) Prepare DataFrame form of X_test (so we can shuffle columns by name)
+    feature_names = X.columns.tolist()   # X is the original DataFrame of all renamed features
+    X_test_df = pd.DataFrame(X_test, columns=feature_names)
+
+    # 4) For each feature, shuffle it n_repeats times and measure accuracy drop
+    n_repeats = 10
+    perm_importances = np.zeros(len(feature_names))
+    perm_std       = np.zeros(len(feature_names))
+
+    # Loop over feature indices
+    for j, feat in enumerate(feature_names):
+        acc_drops = []
+        for _ in range(n_repeats):
+            # Make a copy of X_test_df and shuffle **only** column `feat`
+            X_shuffled = X_test_df.copy()
+            X_shuffled[feat] = np.random.permutation(X_shuffled[feat].values)
+
+            # Predict with the model on the shuffled data
+            probs_perm = best_model.predict(X_shuffled.values)
+            preds_perm = probs_perm.argmax(axis=1)
+            acc_perm   = (preds_perm == y_test_labels).mean()
+
+            # Accuracy drop = baseline_acc − acc_perm
+            acc_drops.append(baseline_acc - acc_perm)
+
+        # Store the mean and std of the drops
+        perm_importances[j] = np.mean(acc_drops)
+        perm_std[j] = np.std(acc_drops)
+
+    # 5) Sort features by mean accuracy drop (descending)
+    idx_sorted = np.argsort(perm_importances)[::-1]
+    sorted_feats = [feature_names[i] for i in idx_sorted]
+    sorted_means = perm_importances[idx_sorted]
+    sorted_stds  = perm_std[idx_sorted]
+
+    # 6) Plot a bar chart of (mean drop ± std) for each feature
+    plt.figure(figsize=(12, 6))
+    plt.bar(range(len(sorted_feats)), sorted_means, yerr=sorted_stds, align='center')
+    plt.xticks(range(len(sorted_feats)), sorted_feats, rotation=90)
+    plt.ylabel("Mean accuracy drop (± std) after shuffling")
+    plt.title("Permutation‐Importance of Each Feature")
+    plt.tight_layout()
+
+    perm_path = os.path.join(f'/Users/a_fin/Desktop/Year 4/Project/Data/', 'permutation_importance.png')
+    os.makedirs(os.path.dirname(perm_path), exist_ok=True)
+    plt.savefig(perm_path)
+    plt.close()
+    print(f"Saved manual permutation‐importance plot → {perm_path}")
+
+    # 7) Optionally, print top 5 features
+    print("Top 5 features by permutation‐importance (manual):")
+    for i in range(min(5, len(sorted_feats))):
+        print(f"  {i+1}. {sorted_feats[i]} (mean drop = {sorted_means[i]:.4f} ± {sorted_stds[i]:.4f})")
+
+    # —————————————————————————————————————————————————————————————— 
+
+        # —————————————————————————————— 8.75 SHAP EXPLANATIONS (FIXED) ——————————————————————————————
+
+    # Pick a small background set (e.g. up to 100 random training samples)
+    np.random.seed(42)
+    bg_indices = np.random.choice(X_train.shape[0], size=min(100, X_train.shape[0]), replace=False)
+    X_background = X_train[bg_indices]
+
+    # 1) Create the DeepExplainer
+    # If you see a “DeepExplainer with TensorFlow eager mode” error, you can uncomment:
+    #    tf.compat.v1.disable_eager_execution()
+    explainer = shap.DeepExplainer(best_model, X_background)
+
+    # 2) Select a modest subset of X_test to explain (up to 100 points)
+    test_indices = np.random.choice(X_test.shape[0], size=min(100, X_test.shape[0]), replace=False)
+    X_shap = X_test[test_indices]
+
+    # 3) Compute SHAP values
+    shap_values = explainer.shap_values(X_shap)
+
+    # 4) Convert shap_values into a single “mean |SHAP| per feature” vector of length = n_features
+    if isinstance(shap_values, list):
+        # shap_values is a list of length = n_classes; each entry is (n_samples, n_features)
+        # Compute per-class mean(|shap|)
+        mean_abs_per_class = [np.abs(cls_shap).mean(axis=0) for cls_shap in shap_values]
+        # Now average over classes → result shape = (n_features,)
+        shap_abs_mean = np.mean(mean_abs_per_class, axis=0)
+
+    else:
+        # shap_values is a single ndarray. Possible shapes:
+        #  - (n_samples, n_features)        (binary or single-output)
+        #  - (n_classes, n_samples, n_features)   (multi-output packed into one array)
+        arr = np.array(shap_values)
+        if arr.ndim == 2:
+            # Only one output dimension: arr.shape = (n_samples, n_features)
+            shap_abs_mean = np.abs(arr).mean(axis=0)
+
+        elif arr.ndim == 3:
+            # Either (n_classes, n_samples, n_features) or (n_samples, n_features, n_classes).
+            # We check which axis corresponds to n_classes by comparing to label_names.
+            n_classes = len(label_names)
+            if arr.shape[0] == n_classes and arr.shape[2] != n_classes:
+                # arr.shape = (n_classes, n_samples, n_features)
+                # → take absolute, then mean over samples (axis=1), then mean over classes (axis=0)
+                shap_abs_mean = np.mean(np.abs(arr), axis=(0, 1))
+            elif arr.shape[2] == n_classes and arr.shape[0] != n_classes:
+                # arr.shape = (n_samples, n_features, n_classes)
+                # → take absolute, then mean over classes (axis=2), then mean over samples (axis=0)
+                temp = np.abs(arr).mean(axis=2)   # shape = (n_samples, n_features)
+                shap_abs_mean = temp.mean(axis=0) # shape = (n_features,)
+            else:
+                raise ValueError(f"Unexpected shap_values.shape = {arr.shape}. Cannot infer class axis.")
+        else:
+            raise ValueError(f"Unexpected shap_values.ndim = {arr.ndim}. Expected 2 or 3.")
+
+    # 5) Now shap_abs_mean is guaranteed to have length = n_features
+    feature_names = X.columns.tolist()
+    if shap_abs_mean.shape[0] != len(feature_names):
+        raise ValueError(
+            f"SHAP‐output size mismatch: got {shap_abs_mean.shape[0]} features but expected {len(feature_names)}."
+        )
+
+    # 6) Sort features by average |SHAP|
+    idx_shap = np.argsort(shap_abs_mean)[::-1]
+    sorted_feats_shap = [feature_names[i] for i in idx_shap]
+    sorted_shap_vals   = shap_abs_mean[idx_shap]
+
+    # 7) Plot a bar chart of average |SHAP| per feature
+    plt.figure(figsize=(12, 6))
+    plt.bar(range(len(feature_names)), sorted_shap_vals, align='center')
+    plt.xticks(range(len(feature_names)), sorted_feats_shap, rotation=90)
+    plt.ylabel("Mean(|SHAP value|)")
+    plt.title("Global SHAP‐Importance (average over all classes)")
+    plt.tight_layout()
+
+    shap_path = os.path.join(f'/Users/a_fin/Desktop/Year 4/Project/Data/', 'shap_global_importance.png')
+    os.makedirs(os.path.dirname(shap_path), exist_ok=True)
+    plt.savefig(shap_path)
+    plt.close()
+    print(f"Saved SHAP global importance bar chart → {shap_path}")
+
+    # ——————————————————————————————————————————————————————————————
+
     # 9. Cluster analysis on the full cleaned dataset
-    #    - Re-scale entire cleaned dataset (to use consistent scaling as training)
     scaler = StandardScaler()
     X_clean = clean_impute(X)
     scaler.fit(X_clean)

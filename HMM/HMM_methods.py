@@ -451,7 +451,7 @@ class CustomHMMClustering:
             new_labels = np.argmin(distances, axis=1)
             self.array.loc[mask, 'labels'] = new_labels
 
-    def perform_clustering(self, num_base_states, num_iterations, num_repetitions):
+    def perform_clustering(self, num_base_states, num_iterations, num_repetitions, base_seed=12345):
         num_emissions = len(self.feelings)
         data = self.array[self.feelings].values
         
@@ -472,10 +472,11 @@ class CustomHMMClustering:
 
         for rep in range(num_repetitions):
             print(f"Repetition {rep + 1} of {num_repetitions}")
-            np.random.seed(12345 + rep)
-            random.seed(12345 + rep)
+            seed = base_seed + rep
+            np.random.seed(seed)
+            random.seed(seed)
             
-            model = HMMModel(num_base_states, num_emissions=num_emissions, data=data_normalized, random_seed=12345 + rep)
+            model = HMMModel(num_base_states, num_emissions=num_emissions, data=data_normalized, random_seed=seed)
             model.train(data_normalized, num_iterations=num_iterations, transition_contributions = self.transition_contributions)
             
             state_seq, log_prob = model.decode(data_normalized)
@@ -538,11 +539,14 @@ class CustomHMMClustering:
         num_clusters = np.max(self.labels_fin) + 1
         cmap = plt.get_cmap('tab10')
         colours = [cmap(i) for i in range(num_clusters)]
+        fixed_colours = ['green', 'red', 'blue']
         plt.figure(figsize=(8, 6))
-        plt.scatter(self.array["principal component 1"],
-                    self.array["principal component 2"],
-                    c=[colours[label] for label in self.labels_fin],
-                    s=1)
+        plt.scatter(
+            self.array["principal component 1"],
+            self.array["principal component 2"],
+            c=[fixed_colours[label] for label in self.labels_fin],
+            s=1
+        )
         plt.xlabel("Principal Component 1")
         plt.ylabel("Principal Component 2")
         plt.title("Transition–State HMM Assignments")
@@ -780,9 +784,9 @@ class CustomHMMClustering:
         with open(os.path.join(self.savelocation_TET, 'middle_state_validation.txt'), 'w') as f:
             f.write(msg)
 
-    def run(self, num_base_states, num_iterations, num_repetitions):
+    def run(self, num_base_states, num_iterations, num_repetitions, base_seed = 12345):
         self.preprocess_data()
-        self.perform_clustering(num_base_states, num_iterations, num_repetitions)
+        self.perform_clustering(num_base_states, num_iterations, num_repetitions, base_seed =12345)
         self.calculate_dictionary_clust_labels()
         self.plot_results()
         self._plot_cluster_features()
@@ -798,6 +802,44 @@ class CustomHMMClustering:
         self.plot_state_duration_distribution()
         # -----------------------------------------
         self.validate_middle_state()
+
+        # === NEW: Plot & save “combined PC1/PC2 loading” for ALL features, per cluster ===
+        import numpy as np
+        import matplotlib.pyplot as plt
+        import os
+
+        # 1.  Grab the final centroids in original‐space:
+        centres = self.cluster_centres_fin  # shape = (n_clusters, n_features)
+
+        # 2.  Re‐apply the same z‐scaling, then project into PCA-space:
+        centres_normalized = (centres - self.mean) / self.std
+        centres_pca = centres_normalized.dot(self.principal_components.T)
+        #    centres_pca[i] is now a length‑no_dimensions vector [PC1, PC2, PC3, …].
+
+        # 3.  For each cluster i, compute “combined loading” =  pc1*loading₁ + pc2*loading₂:
+        for i, (pc1, pc2, *_) in enumerate(centres_pca):
+            combined_loading = (
+                pc1 * self.principal_components[0]
+                + pc2 * self.principal_components[1]
+            )  # length = n_features
+
+            # 4.  Plot ALL features on the x-axis, y = combined_loading
+            plt.figure(figsize=(12, 6))
+            inds = np.arange(len(self.feelings))
+            plt.bar(inds, combined_loading, color='steelblue')
+            plt.xticks(inds, self.feelings, rotation=45, ha='right')
+            plt.ylabel('Combined loading (PC1·λ₁ + PC2·λ₂)')
+            plt.title(f'Cluster {i+1} – Combined PCA‐loading for all features')
+            plt.tight_layout()
+
+            # 5.  Save to disk alongside your other figures
+            filename = os.path.join(
+                self.savelocation_TET,
+                f'cluster_{i+1}_combined_loading_all_features.png'
+            )
+            plt.savefig(filename)
+            plt.close()
+        # === END NEW ===
         return self.array, self.dictionary_clust_labels, self.group_transitions, self.copy
 
 # =============================================================================|
