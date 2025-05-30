@@ -37,17 +37,16 @@ feelings_diffs:
 
 no_dimensions_PCA: 2  # Number of dimensions to run the PCA on.
 no_clust: 2  # Number of vectoral clusters, note total clusters will be one greater as the stable cluster is split into 2.
-no_of_jumps: 1  # Number of timestep jumps in the TET to form the vectors. 7 for the Kmeans 1 for HMM
+no_of_jumps: 1  # Number of timestep jumps in the TET to form the vectors. 7 for the Kmeans 1 for HMM (relic)
 no_states: 2 # Optimal number of states
-
 headers:
   Subject: 0
   Week: 1
   Session: 2
 
 colours:
-  0: red
-  1: green
+  0: green
+  1: red
   2: blue
   3: yellow
   4: cyan
