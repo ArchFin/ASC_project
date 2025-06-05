@@ -82,7 +82,7 @@ A HMM is a statistical model that describes a system assumed to be a Markov proc
 
 ## Configuration File: `Breathwork.yaml`
 The `Breathwork.yaml` file contains all the necessary configurations for the pipeline. Key sections include:
-- **File Locations:**
+- **File Locations:** 
   - `filelocation_TET`: Path to the input CSV file.
   - `savelocation_TET`: Directory to save outputs.
 - **Feelings and Differences:**
