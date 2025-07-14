@@ -46,6 +46,7 @@ headers:
 
 base_prior: 0.0  # Base prior for the HMM clustering.
 extra_prior: 0.0  # Extra prior for the HMM clustering.
+extra_self_prior: 0.0  # Extra self prior for the HMM clustering.
 transition_temp: 1.0  # Temperature for the transition probabilities.
 
 colours:

@@ -7,143 +7,147 @@ import pandas as pd
 from scipy.stats import multivariate_t
 from scipy.ndimage import gaussian_filter1d
 
-# -------------------------
-# 1. Parameter Fitting
-# -------------------------
-def fit_t_params(df, state_column=None, dfs=5):
-    """
-    Estimate means & covariances for each state (or overall if state_column=None).
-    Returns a dict: {state: {'mean':…, 'cov':…, 'df':…}}.
-    """
-    # This function is useful if you want to fit t-distribution parameters from real data
-    params = {}
-    if state_column is None:
-        sub = df.dropna()
-        params[0] = {
-            'mean': sub.values.mean(axis=0),
-            'cov':  sub.cov().values,
-            'df':   dfs
-        }
-    else:
-        for s in df[state_column].unique():
-            sub = df[df[state_column] == s].dropna()
-            params[s] = {
-                'mean': sub.drop(columns=state_column).values.mean(axis=0),
-                'cov':  sub.drop(columns=state_column).cov().values,
+class TETSimulator:
+    def __init__(self, params=None, feature_names=None, transition_matrix=None, initial_probs=None, smoothness=0):
+        self.params = params
+        self.feature_names = feature_names
+        self.transition_matrix = transition_matrix
+        self.initial_probs = initial_probs
+        self.smoothness = smoothness
+
+    @staticmethod
+    def fit_t_params(df, state_column=None, dfs=5):
+        """
+        Estimate means & covariances for each state (or overall if state_column=None).
+        Returns a dict: {state: {'mean':…, 'cov':…, 'df':…}}.
+        """
+        # This function is useful if you want to fit t-distribution parameters from real data
+        params = {}
+        if state_column is None:
+            sub = df.dropna()
+            params[0] = {
+                'mean': sub.values.mean(axis=0),
+                'cov':  sub.cov().values,
                 'df':   dfs
             }
-    return params
+        else:
+            for s in df[state_column].unique():
+                sub = df[df[state_column] == s].dropna()
+                params[s] = {
+                    'mean': sub.drop(columns=state_column).values.mean(axis=0),
+                    'cov':  sub.drop(columns=state_column).cov().values,
+                    'df':   dfs
+                }
+        return params
 
-# -------------------------
-# 2. Markov Chain State Sequence Generator
-# -------------------------
-def simulate_markov_states(n_samples, transition_matrix, initial_probs=None, state_labels=None):
-    """
-    Simulate a sequence of states using a Markov chain.
-    transition_matrix: 2D numpy array (K x K), rows sum to 1.
-    initial_probs: 1D array of initial state probabilities (optional).
-    state_labels: list of state labels (optional, default: 0..K-1)
-    Returns: array of state labels
-    """
-    # This function generates a sequence of state labels with Markovian transitions
-    K = transition_matrix.shape[0]
-    if state_labels is None:
-        state_labels = list(range(K))
-    if initial_probs is None:
-        initial_probs = np.ones(K) / K
-    states = np.empty(n_samples, dtype=object)
-    states[0] = np.random.choice(state_labels, p=initial_probs)
-    for t in range(1, n_samples):
-        prev_idx = state_labels.index(states[t-1])
-        states[t] = np.random.choice(state_labels, p=transition_matrix[prev_idx])
-    return states
+    def simulate_markov_states(self, n_samples, transition_matrix=None, initial_probs=None, state_labels=None):
+        """
+        Simulate a sequence of states using a Markov chain.
+        transition_matrix: 2D numpy array (K x K), rows sum to 1.
+        initial_probs: 1D array of initial state probabilities (optional).
+        state_labels: list of state labels (optional, default: 0..K-1)
+        Returns: array of state labels
+        """
+        # This function generates a sequence of state labels with Markovian transitions
+        if transition_matrix is None:
+            transition_matrix = self.transition_matrix
+        if initial_probs is None:
+            initial_probs = self.initial_probs
+        K = transition_matrix.shape[0]
+        if state_labels is None:
+            state_labels = list(range(K))
+        if initial_probs is None:
+            initial_probs = np.ones(K) / K
+        states = np.empty(n_samples, dtype=object)
+        states[0] = np.random.choice(state_labels, p=initial_probs)
+        for t in range(1, n_samples):
+            prev_idx = state_labels.index(states[t-1])
+            states[t] = np.random.choice(state_labels, p=transition_matrix[prev_idx])
+        return states
 
-# -------------------------
-# 3. Main Simulation Function
-# -------------------------
-def simulate_tet(
-    n_samples,
-    emit_params,
-    weights=None,
-    transition_matrix=None,
-    initial_probs=None,
-    feature_names=None,
-    smoothness=0
-):
-    """
-    Simulate TET data from a mixture or Markov sequence of Student-t emissions.
-    n_samples: int, number of samples to generate
-    emit_params: dict mapping state → {'mean', 'cov', 'df'}
-    weights: array-like, mixture weights (if no Markov chain)
-    transition_matrix: 2D array, Markov transition matrix (if simulating Markov chain)
-    initial_probs: 1D array, initial state probabilities (Markov chain)
-    feature_names: list of feature names (optional)
-    smoothness: float, standard deviation for Gaussian smoothing (0 = no smoothing)
-    Returns:
-      data_df: DataFrame of simulated features
-      states:  array of chosen state at each time
-    """
-    # 1. Generate state sequence (Markov or mixture)
-    states_list = list(emit_params.keys())
-    K = len(states_list)
-    if transition_matrix is not None:
-        states = simulate_markov_states(n_samples, np.array(transition_matrix), initial_probs, state_labels=states_list)
-    else:
-        if weights is None:
-            weights = np.ones(K) / K
-        weights = np.array(weights)
-        assert np.isclose(weights.sum(), 1), "Weights must sum to 1"
-        states = np.random.choice(states_list, size=n_samples, p=weights)
-    # 2. Draw from the corresponding multivariate t for each state
-    obs = []
-    for s in states:
-        p = emit_params[s]
-        obs.append(multivariate_t.rvs(loc=p['mean'], shape=p['cov'], df=p['df']))
-    obs = np.vstack(obs)
-    # 3. Feature names
-    if feature_names is None:
-        feature_names = [f"F{i}" for i in range(obs.shape[1])]
-    # 4. Smooth features if requested (controls temporal smoothness of the curves)
-    if smoothness > 0:
-        for i in range(obs.shape[1]):
-            obs[:, i] = gaussian_filter1d(obs[:, i], sigma=smoothness)
-    # 5. Normalize features to [0, 1]
-    obs_min = obs.min(axis=0)
-    obs_max = obs.max(axis=0)
-    obs_norm = (obs - obs_min) / (obs_max - obs_min + 1e-8)
-    data_df = pd.DataFrame(obs_norm, columns=feature_names)
-    return data_df, states
+    def simulate_tet(self, n_samples, emit_params=None, weights=None, transition_matrix=None, initial_probs=None, feature_names=None, smoothness=None):
+        """
+        Simulate TET data from a mixture or Markov sequence of Student-t emissions.
+        n_samples: int, number of samples to generate
+        emit_params: dict mapping state → {'mean', 'cov', 'df'}
+        weights: array-like, mixture weights (if no Markov chain)
+        transition_matrix: 2D array, Markov transition matrix (if simulating Markov chain)
+        initial_probs: 1D array, initial state probabilities (Markov chain)
+        feature_names: list of feature names (optional)
+        smoothness: float, standard deviation for Gaussian smoothing (0 = no smoothing)
+        Returns:
+          data_df: DataFrame of simulated features
+          states:  array of chosen state at each time
+        """
+        # 1. Generate state sequence (Markov or mixture)
+        if emit_params is None:
+            emit_params = self.params
+        if transition_matrix is None:
+            transition_matrix = self.transition_matrix
+        if initial_probs is None:
+            initial_probs = self.initial_probs
+        if feature_names is None:
+            feature_names = self.feature_names
+        if smoothness is None:
+            smoothness = self.smoothness
+        states_list = list(emit_params.keys())
+        K = len(states_list)
+        if transition_matrix is not None:
+            states = self.simulate_markov_states(n_samples, np.array(transition_matrix), initial_probs, state_labels=states_list)
+        else:
+            if weights is None:
+                weights = np.ones(K) / K
+            weights = np.array(weights)
+            assert np.isclose(weights.sum(), 1), "Weights must sum to 1"
+            states = np.random.choice(states_list, size=n_samples, p=weights)
+        # 2. Draw from the corresponding multivariate t for each state
+        obs = []
+        for s in states:
+            p = emit_params[s]
+            obs.append(multivariate_t.rvs(loc=p['mean'], shape=p['cov'], df=p['df']))
+        obs = np.vstack(obs)
+        # 3. Feature names
+        if feature_names is None:
+            feature_names = [f"F{i}" for i in range(obs.shape[1])]
+        # 4. Smooth features if requested (controls temporal smoothness of the curves)
+        if smoothness > 0:
+            for i in range(obs.shape[1]):
+                obs[:, i] = gaussian_filter1d(obs[:, i], sigma=smoothness)
+        # 5. Normalize features to [0, 1]
+        obs_min = obs.min(axis=0)
+        obs_max = obs.max(axis=0)
+        obs_norm = (obs - obs_min) / (obs_max - obs_min + 1e-8)
+        data_df = pd.DataFrame(obs_norm, columns=feature_names)
+        return data_df, states
 
-# -------------------------
-# 4. Save Simulated Data
-# -------------------------
-def save_simulated_tet_data(data_df, states, filename, extra_columns=None, template_columns=None):
-    """
-    Save simulated TET data to CSV in a format similar to real TET data.
-    data_df: DataFrame of simulated features
-    states: array of state labels
-    filename: output CSV file path
-    extra_columns: dict of {colname: value or list} to add to DataFrame
-    template_columns: list of column names to match real data (optional)
-    """
-    # This function adds metadata columns and saves the DataFrame in the correct format
-    df = data_df.copy()
-    df['Cluster'] = states  # Add state label column (like real data)
-    if extra_columns:
-        for col, val in extra_columns.items():
-            if hasattr(val, '__len__') and not isinstance(val, str):
-                df[col] = val
-            else:
-                df[col] = [val]*len(df)
-    # Add any missing columns from template, fill with NaN
-    if template_columns is not None:
-        for col in template_columns:
-            if col not in df.columns:
-                df[col] = np.nan
-        # Reorder columns to match template
-        df = df[template_columns]
-    df.to_csv(filename, index=False)
-    print(f"Simulated data saved to {filename}")
+    @staticmethod
+    def save_simulated_tet_data(data_df, states, filename, extra_columns=None, template_columns=None):
+        """
+        Save simulated TET data to CSV in a format similar to real TET data.
+        data_df: DataFrame of simulated features
+        states: array of state labels
+        filename: output CSV file path
+        extra_columns: dict of {colname: value or list} to add to DataFrame
+        template_columns: list of column names to match real data (optional)
+        """
+        # This function adds metadata columns and saves the DataFrame in the correct format
+        df = data_df.copy()
+        df['Cluster'] = states  # Add state label column (like real data)
+        if extra_columns:
+            for col, val in extra_columns.items():
+                if hasattr(val, '__len__') and not isinstance(val, str):
+                    df[col] = val
+                else:
+                    df[col] = [val]*len(df)
+        # Add any missing columns from template, fill with NaN
+        if template_columns is not None:
+            for col in template_columns:
+                if col not in df.columns:
+                    df[col] = np.nan
+            # Reorder columns to match template
+            df = df[template_columns]
+        df.to_csv(filename, index=False)
+        print(f"Simulated data saved to {filename}")
 
 # -------------------------
 # 5. Example Usage & Step-by-Step Guide
@@ -205,13 +209,20 @@ if __name__ == "__main__":
     subject_col = []
     week_col = []
     session_col = []
+    sim = TETSimulator(
+        params=params,
+        feature_names=feature_names,
+        transition_matrix=np.array(transition_matrix),
+        initial_probs=np.array(initial_probs),
+        smoothness=10
+    )
     for subj in subjects:
         for week in weeks:
             for sess in sessions:
                 # For each (Subject, Week, Session), simulate a time series block
-                sim_data_block, sim_states_block = simulate_tet(
-                    timepoints_per_session, params, transition_matrix=transition_matrix,
-                    initial_probs=initial_probs, feature_names=feature_names, smoothness=8)
+                sim_data_block, sim_states_block = sim.simulate_tet(
+                    timepoints_per_session
+                )
                 all_data.append(sim_data_block)
                 all_states.append(sim_states_block)
                 subject_col.extend([subj]*timepoints_per_session)
@@ -230,13 +241,61 @@ if __name__ == "__main__":
     template_columns = [
         'Subject','Week','Session','Condition','MetaAwareness','Presence','PhysicalEffort','MentalEffort','Boredom','Receptivity','EmotionalIntensity','Clarity','Release','Bliss','Embodiment','Insightfulness','Anxiety','SpiritualExperience','Cluster'
     ]
-    save_simulated_tet_data(
+    TETSimulator.save_simulated_tet_data(
         sim_data_full, sim_states_full,
         '/Users/a_fin/Desktop/Year 4/Project/Summer_Data/simulated_TET_for_HMM.csv',
         extra_columns=extra_cols,
         template_columns=template_columns
     )
     
+    # === STEP 2.5: Add smooth data configurations to YAML config ===
+    # Generate both smooth and unsmooth versions for testing
+    # Create enhanced TET data - smooth version with high smoothness value
+    sim_smooth = TETSimulator(
+        params=params,
+        feature_names=feature_names,
+        transition_matrix=np.array(transition_matrix),
+        initial_probs=np.array(initial_probs),
+        smoothness=1  # High smoothness for testing smooth data pipeline
+    )
+
+    all_data_smooth = []
+    all_states_smooth = []
+    subject_col_smooth = []
+    week_col_smooth = []
+    session_col_smooth = []
+
+    print("Generating SMOOTH version for pipeline testing...")
+    for subj in subjects:
+        for week in weeks:
+            for sess in sessions:
+                sim_data_block, sim_states_block = sim_smooth.simulate_tet(timepoints_per_session)
+                all_data_smooth.append(sim_data_block)
+                all_states_smooth.append(sim_states_block)
+                subject_col_smooth.extend([subj]*timepoints_per_session)
+                week_col_smooth.extend([week]*timepoints_per_session)
+                session_col_smooth.extend([sess]*timepoints_per_session)
+
+    sim_data_full_smooth = pd.concat(all_data_smooth, ignore_index=True)
+    sim_states_full_smooth = np.concatenate(all_states_smooth)
+
+    extra_cols_smooth = {
+        'Subject': subject_col_smooth,
+        'Week': week_col_smooth,
+        'Session': session_col_smooth,
+        'Condition': 'Simulated_Smooth',
+    }
+
+    TETSimulator.save_simulated_tet_data(
+        sim_data_full_smooth, sim_states_full_smooth,
+        '/Users/a_fin/Desktop/Year 4/Project/Summer_Data/simulated_TET_SMOOTH_for_HMM.csv',
+        extra_columns=extra_cols_smooth,
+        template_columns=template_columns
+    )
+
+    print(f"Smooth data smoothness metric: {np.mean(np.abs(np.diff(sim_data_full_smooth[feature_names].values, axis=0))):.6f}")
+    print(f"Original data smoothness metric: {np.mean(np.abs(np.diff(sim_data_full[feature_names].values, axis=0))):.6f}")
+
     # -------------
     # For your own use:
     # 1. Edit 'params' to set means/covs/dfs for each state (including metastable)
