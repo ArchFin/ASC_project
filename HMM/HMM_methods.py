@@ -31,7 +31,8 @@ from sklearn.metrics.cluster import normalized_mutual_info_score
 # =============================================================================|
 # Configuration via YAML                                                       |
 # =============================================================================|
-# Note: Config will be loaded by individual classes as needed
+with open("Breathwork.yaml", "r") as file:
+    config = yaml.safe_load(file)  # Converts YAML to a Python dictionary
 
 # =============================================================================|
 # CSV File Handling                                                            |
@@ -160,282 +161,11 @@ class principal_component_finder:
 
         return df_TET_feelings_prin_dict
 
-# =========================
-# Smoothness Detection & Model Switching
-# =========================
-class PipelineManager:
-    SMOOTHNESS_THRESHOLD = 0.1  # Calibrated for smoothness=5
-    def __init__(self, config_path, feelings, principal_components=None, no_of_jumps=1):
-        self.config_path = config_path
-        self.feelings = feelings
-        self.principal_components = principal_components
-        self.no_of_jumps = no_of_jumps
-        self.load_config()
-    def load_config(self):
-        with open(self.config_path, "r") as file:
-            self.config = yaml.safe_load(file)
-    def compute_smoothness_metric(self, data: pd.DataFrame) -> float:
-        print(f"[PIPELINE] Computing smoothness metric for data with shape: {data.shape}")
-        print(f"[PIPELINE] Using {len(self.feelings)} feeling features: {self.feelings}")
-        
-        if len(data) < 2:
-            print("[PIPELINE] WARNING: Data has less than 2 rows, returning smoothness = 0.0")
-            return 0.0
-            
-        scaler = StandardScaler()
-        normalized_data = scaler.fit_transform(data[self.feelings])
-        diffs = np.abs(np.diff(normalized_data, axis=0))
-        smoothness = np.mean(diffs)
-        
-        print(f"[PIPELINE] Data normalization complete. Mean difference between consecutive points: {smoothness:.6f}")
-        print(f"[PIPELINE] Smoothness threshold is set to: {self.SMOOTHNESS_THRESHOLD:.6f}")
-        
-        return smoothness
-    def select_model(self, data):
-        print(f"[PIPELINE] ========== MODEL SELECTION PHASE ==========")
-        print(f"[PIPELINE] Analyzing data to determine optimal model...")
-        
-        smoothness = self.compute_smoothness_metric(data)
-        print(f"[PIPELINE] Computed smoothness metric: {smoothness:.6f}")
-        print(f"[PIPELINE] Decision threshold: {self.SMOOTHNESS_THRESHOLD:.6f}")
-        
-        if smoothness < self.SMOOTHNESS_THRESHOLD:
-            print(f"[PIPELINE] ✓ Data is SMOOTH (smoothness < threshold)")
-            print(f"[PIPELINE] → Selected model: GaussianARHMM (suitable for smooth temporal data)")
-            print(f"[PIPELINE] → Model characteristics: Uses autoregressive features, Gaussian emissions")
-            return GaussianARHMMClustering(self.config, self.feelings)
-        else:
-            print(f"[PIPELINE] ✓ Data is ROUGH (smoothness ≥ threshold)")
-            print(f"[PIPELINE] → Selected model: Transition-State t-HMM (suitable for abrupt changes)")
-            print(f"[PIPELINE] → Model characteristics: Multivariate t-distributions, explicit transition state")
-            return CustomHMMClustering(
-                self.config['filelocation_TET'],
-                self.config['savelocation_TET'],
-                data,
-                self.feelings,
-                self.principal_components,
-                self.no_of_jumps,
-                transition_contributions=1.0,
-                base_prior=self.config.get('base_prior', 0.1),
-                extra_prior=self.config.get('extra_prior', 0.1),
-                extra_self_prior=self.config.get('extra_self_prior', 0.05),
-                transition_temp=self.config.get('transition_temp', 1.0),
-                transition_constraint_lim=self.config.get('transition_constraint_lim', 0.5)
-            )
-    def run_pipeline(self, data, num_base_states=2, num_iterations=15, num_repetitions=2):
-        print(f"[PIPELINE] ========== PIPELINE EXECUTION PHASE ==========")
-        print(f"[PIPELINE] Input parameters:")
-        print(f"[PIPELINE] - Number of base states: {num_base_states}")
-        print(f"[PIPELINE] - Number of iterations: {num_iterations}")
-        print(f"[PIPELINE] - Number of repetitions: {num_repetitions}")
-        print(f"[PIPELINE] - Data shape: {data.shape}")
-        
-        model = self.select_model(data)
-        self.model = model
-        
-        if isinstance(model, GaussianARHMMClustering):
-            print(f"[PIPELINE] ========== EXECUTING GAUSSIAN AR-HMM ==========")
-            print(f"[PIPELINE] Running GaussianARHMM with autoregressive features...")
-            results = model.run(data)
-            print(f"[PIPELINE] ✓ GaussianARHMM execution completed successfully")
-            return results
-        else:
-            print(f"[PIPELINE] ========== EXECUTING TRANSITION-STATE t-HMM ==========")
-            print(f"[PIPELINE] Running CustomHMM with multivariate t-distributions...")
-            results = model.run(num_base_states, num_iterations, num_repetitions)
-            print(f"[PIPELINE] ✓ CustomHMM execution completed successfully")
-            return results
-
-# =========================
-# Gaussian AR-HMM for Smooth Data
-# =========================
-class GaussianARHMMClustering:
-    def __init__(self, config, feelings):
-        self.config = config
-        self.feelings = feelings
-        self.savelocation = config['savelocation_TET']
-        self.num_states = 3  # Two stable + one transitional
-    def create_ar_features(self, X, ar_order=1):
-        X_ar = []
-        for t in range(ar_order, len(X)):
-            X_ar.append(np.concatenate([X[t]] + [X[t - j - 1] for j in range(ar_order)]))
-        return np.array(X_ar)
-    def run(self, data):
-        print(f"[GAUSSIAN-AR-HMM] ========== STARTING GAUSSIAN AR-HMM CLUSTERING ==========")
-        print(f"[GAUSSIAN-AR-HMM] Input data shape: {data.shape}")
-        print(f"[GAUSSIAN-AR-HMM] Number of states: {self.num_states}")
-        print(f"[GAUSSIAN-AR-HMM] Feeling features: {self.feelings}")
-        
-        self.data = data.copy()
-        self.data['number'] = range(len(self.data))
-        self.mean = self.data[self.feelings].mean(axis=0)
-        self.std = self.data[self.feelings].std(axis=0)
-        self.std[self.std == 0] = 1.0
-        
-        print(f"[GAUSSIAN-AR-HMM] Data normalization complete")
-        print(f"[GAUSSIAN-AR-HMM] Mean values: {self.mean.round(3).tolist()}")
-        print(f"[GAUSSIAN-AR-HMM] Std values: {self.std.round(3).tolist()}")
-        
-        normalized_data = (self.data[self.feelings] - self.mean) / self.std
-        X = normalized_data.values
-        X_ar = self.create_ar_features(X, ar_order=1)
-        
-        print(f"[GAUSSIAN-AR-HMM] Created autoregressive features. Shape: {X_ar.shape}")
-        print(f"[GAUSSIAN-AR-HMM] Original data points: {len(X)}, AR data points: {len(X_ar)}")
-        
-        model = hmm.GaussianHMM(
-            n_components=self.num_states,
-            covariance_type="full",
-            n_iter=10000,
-            random_state=self.config.get('random_seed', 42),
-            init_params="cm",  # Only initialize means and covariances, not transmat
-            params="cm"         # Only update means and covariances during training
-        )
-        # Initialize transition matrix with higher probability of entering and staying in the transitional state
-        model.startprob_ = np.full(self.num_states, 1.0 / self.num_states)
-        model.transmat_ = np.array([
-            [0.90, 0.0, 0.1],
-            [0.0, 0.90, 0.1],
-            [0.20, 0.20, 0.60]
-        ])
-        print(f"[GAUSSIAN-AR-HMM] Initialized transition matrix:")
-        print(model.transmat_)
-        # K-means for stable state means
-        from sklearn.cluster import KMeans
-        kmeans = KMeans(n_clusters=2, random_state=self.config.get('random_seed', 42)).fit(X_ar)
-        stable_means = kmeans.cluster_centers_
-        # Transitional state mean: average of stable means
-        trans_mean = np.mean(stable_means, axis=0)
-        means_init = np.vstack([stable_means, trans_mean])
-        model.means_ = means_init
-        print(f"[GAUSSIAN-AR-HMM] Initialized means:")
-        print(model.means_)
-        # Initialize covariances: stable states from data, transitional state as large average
-        covs = np.zeros((self.num_states, X_ar.shape[1], X_ar.shape[1]))
-        for i in range(2):
-            covs[i] = np.cov(X_ar[kmeans.labels_ == i].T) + np.eye(X_ar.shape[1])*1e-3
-        covs[2] = np.mean(covs[:2], axis=0) * 5.0  # Transitional state: much more diffuse
-        model.covars_ = covs
-        print(f"[GAUSSIAN-AR-HMM] Initialized covariances. Transitional state covariance trace: {np.trace(covs[2]):.3f}")
-        print(f"[GAUSSIAN-AR-HMM] Fitting GaussianHMM model...")
-        model.fit(X_ar)
-        print(f"[GAUSSIAN-AR-HMM] Model fitting completed. Converged: {model.monitor_.converged}")
-        # Optionally, make the transitional state more diffuse after fitting
-        model.covars_[2] *= 2.0
-        
-        state_sequence_ar = model.predict(X_ar)
-        gamma_ar = model.predict_proba(X_ar)
-        
-        print(f"[GAUSSIAN-AR-HMM] State prediction completed")
-        print(f"[GAUSSIAN-AR-HMM] Unique states found: {np.unique(state_sequence_ar)}")
-        print(f"[GAUSSIAN-AR-HMM] State distribution: {np.bincount(state_sequence_ar)}")
-        
-        full_state_sequence = np.zeros(len(X), dtype=int)
-        full_gamma = np.zeros((len(X), self.num_states))
-        full_state_sequence[:1] = state_sequence_ar[0]
-        full_gamma[:1, state_sequence_ar[0]] = 1
-        full_state_sequence[1:] = state_sequence_ar
-        full_gamma[1:] = gamma_ar
-        
-        cov_traces = [np.trace(model.covars_[i]) for i in range(self.num_states)]
-        transitional_idx = np.argmax(cov_traces)
-        stable_idxs = [i for i in range(self.num_states) if i != transitional_idx]
-        
-        print(f"[GAUSSIAN-AR-HMM] Covariance traces: {[f'{trace:.3f}' for trace in cov_traces]}")
-        print(f"[GAUSSIAN-AR-HMM] Identified transitional state: {transitional_idx} (highest covariance trace)")
-        print(f"[GAUSSIAN-AR-HMM] Stable states: {stable_idxs}")
-        
-        self.data['labels'] = full_state_sequence
-        for i in range(self.num_states):
-            self.data[f'gamma_{i}'] = full_gamma[:, i]
-            
-        self.cluster_centers = []
-        for state in range(self.num_states):
-            state_data = self.data[self.data['labels'] == state]
-            if len(state_data) > 0:
-                center = state_data[self.feelings].mean().values
-                print(f"[GAUSSIAN-AR-HMM] State {state}: {len(state_data)} points, center: {center.round(3)}")
-            else:
-                center = np.zeros(len(self.feelings))
-                print(f"[GAUSSIAN-AR-HMM] State {state}: 0 points, using zero center")
-            self.cluster_centers.append(center)
-            
-        self.cluster_centers = np.array(self.cluster_centers)
-        self.labels_fin = self.data['labels']
-        self.avg_fs = full_gamma
-        self.dictionary_clust_labels = {i: f"State {i+1}" for i in range(self.num_states)}
-        
-        print(f"[GAUSSIAN-AR-HMM] ========== GAUSSIAN AR-HMM CLUSTERING COMPLETED ==========")
-        print(f"[GAUSSIAN-AR-HMM] Final state assignments: {np.bincount(self.labels_fin)}")
-        print(f"[GAUSSIAN-AR-HMM] Cluster dictionary: {self.dictionary_clust_labels}")
-        
-        return self.data, self.dictionary_clust_labels, {}, self.data.copy()
-
-    def validate_transition_matrix(self, learned_trans, true_trans, align_states=True):
-        """
-        Compare the learned transition matrix to the true transition matrix.
-        For GaussianARHMM, we don't have a learned transition matrix, so return dummy values.
-        """
-        print("[GAUSSIAN-AR-HMM] ========== TRANSITION MATRIX VALIDATION ==========")
-        print("[GAUSSIAN-AR-HMM] Note: GaussianARHMM doesn't learn explicit transition matrices like t-HMM")
-        print("[GAUSSIAN-AR-HMM] Returning dummy validation metrics for consistency")
-        print("[GAUSSIAN-AR-HMM] ========================================================")
-        return {
-            'frob_norm': 0.0,
-            'max_err': 0.0,
-            'mean_err': 0.0,
-            'mean_kl_divergence': 0.0,
-            'learned_aligned': np.eye(2),  # Dummy 2x2 identity
-            'true_aligned': np.array(true_trans)[:2, :2] if len(true_trans) > 2 else np.array(true_trans),
-            'abs_err': np.zeros((2, 2)),
-            'alignment_indices': None
-        }
-
-    def validate_state_sequence(self, decoded_seq, true_seq):
-        """
-        Compare the decoded state sequence to the true state sequence.
-        """
-        from sklearn.metrics import accuracy_score, normalized_mutual_info_score
-        from scipy.optimize import linear_sum_assignment
-        import numpy as np
-        
-        print("[GAUSSIAN-AR-HMM] ========== STATE SEQUENCE VALIDATION ==========")
-        print(f"[GAUSSIAN-AR-HMM] Comparing decoded sequence (length: {len(decoded_seq)}) with true sequence (length: {len(true_seq)})")
-        
-        # Align states using Hungarian algorithm
-        n_states = max(max(decoded_seq), max(true_seq)) + 1
-        cost = np.zeros((n_states, n_states))
-        for i in range(n_states):
-            for j in range(n_states):
-                cost[i, j] = -np.sum((decoded_seq == i) & (true_seq == j))
-        
-        row_ind, col_ind = linear_sum_assignment(cost)
-        
-        # Remap decoded_seq
-        mapping = {row: col for row, col in zip(row_ind, col_ind)}
-        decoded_seq_aligned = np.array([mapping.get(s, s) for s in decoded_seq])
-        
-        acc = accuracy_score(true_seq, decoded_seq_aligned)
-        nmi = normalized_mutual_info_score(true_seq, decoded_seq_aligned)
-        
-        print(f"[GAUSSIAN-AR-HMM] State alignment mapping: {mapping}")
-        print(f"[GAUSSIAN-AR-HMM] Validation accuracy: {acc:.4f}")
-        print(f"[GAUSSIAN-AR-HMM] Normalized mutual information: {nmi:.4f}")
-        print("[GAUSSIAN-AR-HMM] =================================================")
-        
-        return {
-            'accuracy': acc, 
-            'nmi': nmi, 
-            'decoded_aligned': decoded_seq_aligned,
-            'state_mapping': mapping
-        }
-
-
 # =============================================================================|
 # Custom HMM Model using multivariate t–distribution                           |
 # =============================================================================|
 class HMMModel:
-    def __init__(self, num_base_states, num_emissions, data=None, random_seed=12345, base_prior=0, extra_prior=0, extra_self_prior=0, transition_temp=0):
+    def __init__(self, num_base_states, num_emissions, data=None, random_seed=12345, base_prior=0, extra_prior=0, transition_temp=0):
         """
         The model will have an extra state in addition to the base states.
         num_base_states: number of "pure" states.
@@ -448,7 +178,6 @@ class HMMModel:
         self.num_states = num_base_states + 1  # Extra state for transitions.
         self.base_prior = base_prior
         self.extra_prior = extra_prior
-        self.extra_self_prior = extra_self_prior
         self.transition_temp = transition_temp
         np.random.seed(random_seed)
         random.seed(random_seed)
@@ -460,32 +189,15 @@ class HMMModel:
             self.emission_means = np.zeros((self.num_states, num_emissions))
             # Base states get the k-means centers.
             self.emission_means[:num_base_states] = base_centers
-            # Transitional state gets the mean of base centers plus a scaled offset for separation
-            offset = 1.5 * (np.max(base_centers, axis=0) - np.min(base_centers, axis=0))
-            self.emission_means[-1] = np.mean(base_centers, axis=0) + offset
+            # Compute an offset based on spread of base centers.
+            offset = 0.2 * (np.max(base_centers, axis=0) - np.min(base_centers, axis=0))
+            # Transitional state gets the average plus offset.
+            self.emission_means[-1] = np.mean(base_centers, axis=0) - offset 
 
-            # Initialize with more realistic transition probabilities
-            # High self-transition for base states, low for extra state
-            self.trans_prob = np.zeros((self.num_states, self.num_states))
-            
-            # Base states: high self-transition (0.9), low transition to extra (0.05), very low to other base (0.05)
-            for i in range(num_base_states):
-                self.trans_prob[i, i] = 0.9  # self-transition
-                self.trans_prob[i, -1] = 0.1  # to extra state
-                # Equal probability to other base states
-                remaining_prob = 0.0
-                if num_base_states > 1:
-                    for j in range(num_base_states):
-                        if i != j:
-                            self.trans_prob[i, j] = remaining_prob / (num_base_states - 1)
-            
-            # Extra state: transitions back to base states with equal probability, low self-transition
-            self.trans_prob[-1, -1] = 0.3  # low self-transition for extra state
-            prob_to_base = 0.7 / num_base_states
-            for i in range(num_base_states):
-                self.trans_prob[-1, i] = prob_to_base
-                
-            # Ensure rows sum to 1
+            # Diagonal-dominated initialization for transition probabilities.
+            base_prob = 0.2
+            self.trans_prob = np.eye(self.num_states) * base_prob + \
+                              np.ones((self.num_states, self.num_states)) * (1 - base_prob) / (self.num_states - 1)
             self.trans_prob /= self.trans_prob.sum(axis=1, keepdims=True)
         else:
             self.emission_means = np.random.randn(self.num_states, num_emissions)
@@ -496,7 +208,6 @@ class HMMModel:
             np.eye(num_emissions) + 1e-4 * np.random.randn(num_emissions, num_emissions)
             for _ in range(self.num_states)
         ])
-        self.emission_covs[-1] *= 2.0  # Transitional state is more diffuse
         self.nu = np.clip(np.random.gamma(5, 1, self.num_states), 2, 10)
 
     @staticmethod
@@ -685,77 +396,48 @@ class HMMModel:
         
         return state_seq, log_prob 
 
-    def train(self, data, num_iterations, transition_contributions, transition_constraint_lim=0.5, extra_self_prior_override=None):
-        prev_log_lik = -np.inf
-        # If provided, override the extra_self_prior for this training run
-        if extra_self_prior_override is not None:
-            self.extra_self_prior = extra_self_prior_override
-        # TIP: If the model underlabels the extra state, try increasing extra_self_prior (e.g., 0.1 or 0.2)
+    def train(self, data, num_iterations, transition_contributions, transition_constraint_lim=0.5):
         for iteration in range(num_iterations):
             print(f"Training iteration {iteration + 1} of {num_iterations}")
-            
-            # 1) E‑step: get soft counts xi[i,j,t]
-            gamma_vals, xi = self.e_step(data)
-            
-            # Calculate log-likelihood for convergence tracking
-            _, _, _, log_lik = self.forward_backward(data)
-            print(f"  Log-likelihood: {log_lik:.3f}")
-            
-            if iteration > 0:
-                improvement = log_lik - prev_log_lik
-                print(f"  Improvement: {improvement:.6f}")
-                if abs(improvement) < 1e-6:
-                    print(f"  Converged at iteration {iteration + 1}")
-                    break
-            prev_log_lik = log_lik
+            # 1) compute how hard to penalize inter‑state jumps this iteration
+            transition_constraint = max(
+                0.25,
+                1.0 - (1.0 - transition_constraint_lim) * (iteration / num_iterations)
+            )
 
-            # 2) M-step for transition matrix with minimal constraints for first half of training
-            if iteration < num_iterations // 2:
-                # First half: learn freely with minimal constraints
-                transition_constraint = 1.0
-            else:
-                # Second half: gradually apply constraints
-                progress = (iteration - num_iterations // 2) / (num_iterations // 2)
-                transition_constraint = 1.0 - (1.0 - transition_constraint_lim) * progress
+            # 2) E‑step: get soft counts xi[i,j,t]
+            gamma_vals, xi = self.e_step(data)
 
             # 3) build a scaling mask that only down‑weights base⟷extra transitions
             scaling = np.ones_like(xi)               # default = no scaling
-            # Only scale transitions involving the extra state in second half
-            if iteration >= num_iterations // 2:
-                scaling[-1, :] = transition_constraint * transition_contributions
-                scaling[:, -1] = transition_constraint * transition_contributions
-                # Allow extra state to transition to itself normally
-                scaling[-1, -1] = 1.0
+            # scale all (extra→base) and (base→extra) by the penalty factor:
+            scaling[-1, :] = transition_constraint * transition_contributions
+            scaling[:, -1] = transition_constraint * transition_contributions
+            # but then exempt the (extra→extra) self‑transition:
+            #scaling[-1, -1] = 0.01
 
             # 4) apply scaling to your xi counts
             constrained_xi = xi * scaling
 
-            # 5) re‑estimate the transition matrix with minimal priors
+            # 5) re‑estimate the transition matrix with your priors + temperature
             self.trans_prob = self.update_transition_probabilities(
                 constrained_xi, self.num_states,
-                base_prior=max(0.1, self.base_prior),  # Minimal base prior
-                extra_prior=max(0.01, self.extra_prior),  # Very small extra prior
-                extra_self_prior=max(0.001, self.extra_self_prior),  # Tiny extra self prior
+                base_prior=self.base_prior,
+                extra_prior=self.extra_prior,
+                extra_self_prior=0,
                 transition_temp=self.transition_temp
             )
-            
-            # Print transition matrix every 10 iterations
-            if (iteration + 1) % 10 == 0:
-                print(f"  Transition matrix at iteration {iteration + 1}:")
-                print(np.round(self.trans_prob, 3))
 
             # 6) clip & renormalize gammas, then M‑step for the emissions
-            gamma_vals = np.clip(gamma_vals, 1e-6, 1.0)
+            gamma_vals = np.clip(gamma_vals, 1e-3, 1.0)
             gamma_vals /= gamma_vals.sum(axis=1, keepdims=True)
-            self.emission_means, self.emission_covs, self.nu = self.update_emission_parameters(
+            self.emission_means, \
+            self.emission_covs, \
+            self.nu = self.update_emission_parameters(
                 data, gamma_vals, self.num_states,
                 make_positive_definite=self.make_positive_definite,
                 estimate_nu=self.estimate_nu
             )
-
-        # After training, print diagnostics for the transitional state
-        print("Transitional state mean:", self.emission_means[-1])
-        print("Transitional state covariance:", self.emission_covs[-1])
 
         return self.trans_prob, self.emission_means, self.emission_covs, self.nu
 
@@ -764,7 +446,7 @@ class HMMModel:
 # Custom Clustering Pipeline Using the Transition-State HMM Model              |
 # =============================================================================|
 class CustomHMMClustering:
-    def __init__(self, filelocation_TET, savelocation_TET, df_csv_file_original, feelings, principal_components, no_of_jumps, transition_contributions, base_prior=0, extra_prior=0, extra_self_prior=0, transition_temp=1.0, transition_constraint_lim=0.5):
+    def __init__(self, filelocation_TET, savelocation_TET, df_csv_file_original, feelings, principal_components, no_of_jumps, transition_contributions, base_prior=0, extra_prior=0, transition_temp=1.0, transition_constraint_lim=0.5):
         self.filelocation_TET = filelocation_TET
         self.savelocation_TET = savelocation_TET
         self.df_csv_file_original = df_csv_file_original
@@ -775,7 +457,6 @@ class CustomHMMClustering:
         self.transition_contributions = transition_contributions
         self.base_prior = base_prior
         self.extra_prior = extra_prior
-        self.extra_self_prior = extra_self_prior
         self.transition_temp = transition_temp
         self.transition_constraint_lim = transition_constraint_lim
 
@@ -820,14 +501,6 @@ class CustomHMMClustering:
             self.array.loc[mask, 'labels'] = new_labels
 
     def perform_clustering(self, num_base_states, num_iterations, num_repetitions, base_seed=12345):
-        print(f"[CUSTOM-HMM] ========== STARTING CUSTOM t-HMM CLUSTERING ==========")
-        print(f"[CUSTOM-HMM] Configuration:")
-        print(f"[CUSTOM-HMM] - Base states: {num_base_states}")
-        print(f"[CUSTOM-HMM] - Total states (including transitional): {num_base_states + 1}")
-        print(f"[CUSTOM-HMM] - Training iterations: {num_iterations}")
-        print(f"[CUSTOM-HMM] - Repetitions for stability: {num_repetitions}")
-        print(f"[CUSTOM-HMM] - Random seed: {base_seed}")
-        
         num_emissions = len(self.feelings)
         data = self.array[self.feelings].values
         
@@ -836,11 +509,6 @@ class CustomHMMClustering:
         self.std = np.std(data, axis=0)
         self.std[self.std == 0] = 1.0
         data_normalized = (data - self.mean) / self.std
-        
-        print(f"[CUSTOM-HMM] Data preprocessing complete:")
-        print(f"[CUSTOM-HMM] - Original data shape: {data.shape}")
-        print(f"[CUSTOM-HMM] - Features (emissions): {num_emissions}")
-        print(f"[CUSTOM-HMM] - Normalization: mean = {self.mean.round(3)}, std = {self.std.round(3)}")
 
         N = data_normalized.shape[0]
         all_trans_probs = np.zeros((num_base_states + 1, num_base_states + 1, num_repetitions))
@@ -852,34 +520,27 @@ class CustomHMMClustering:
         all_log_liks = np.zeros(num_repetitions)
 
         for rep in range(num_repetitions):
-            print(f"[CUSTOM-HMM] ========== REPETITION {rep + 1}/{num_repetitions} ==========")
+            print(f"Repetition {rep + 1} of {num_repetitions}")
             seed = base_seed + rep
             np.random.seed(seed)
             random.seed(seed)
-            print(f"[CUSTOM-HMM] Initializing HMM model with seed: {seed}")
-            
             model = HMMModel(num_base_states, num_emissions=num_emissions, data=data_normalized, random_seed=seed,
-                             base_prior=self.base_prior, extra_prior=self.extra_prior, extra_self_prior=self.extra_self_prior, transition_temp=self.transition_temp)
-            
-            print(f"[CUSTOM-HMM] Training model with {num_iterations} iterations...")
+                             base_prior=self.base_prior, extra_prior=self.extra_prior, transition_temp=self.transition_temp)
             model.train(data_normalized, num_iterations=num_iterations, transition_contributions = self.transition_contributions, transition_constraint_lim = self.transition_constraint_lim)
             
-            print(f"[CUSTOM-HMM] Decoding optimal state sequence...")
             state_seq, log_prob = model.decode(data_normalized)
-            
-            print(f"[CUSTOM-HMM] Computing forward-backward probabilities...")
             _, _, fs, log_lik = model.forward_backward(data_normalized)
             
             if rep == 0:
                 reference_model = model
-                print(f"[CUSTOM-HMM] Set reference model for state alignment")
             else:
-                print(f"[CUSTOM-HMM] Aligning states with reference model...")
                 alignment = self._align_states(reference_model, model, num_base_states + 1)
                 model = self._permute_states(model, alignment)
-                print(f"[CUSTOM-HMM] State alignment completed")
                 
-            print(f"[CUSTOM-HMM] Model shapes - Trans: {model.trans_prob.shape}, Means: {model.emission_means.shape}, Covs: {model.emission_covs.shape}")
+            print(f"Transition probabilities shape: {model.trans_prob.shape}")
+            print(f"Emission means shape: {model.emission_means.shape}")
+            print(f"Emission covariances shape: {model.emission_covs.shape}")
+            print(f"Degrees of freedom shape: {model.nu.shape}")
             
             all_trans_probs[:, :, rep] = model.trans_prob
             all_emission_means[:, :, rep] = model.emission_means
@@ -888,10 +549,7 @@ class CustomHMMClustering:
             all_state_seqs[:, rep] = state_seq
             all_log_probs[rep] = log_prob
             all_log_liks[rep] = log_lik
-            
-            print(f"[CUSTOM-HMM] Repetition {rep + 1} completed - Log likelihood: {log_lik:.3f}")
 
-        print(f"[CUSTOM-HMM] ========== AVERAGING ACROSS REPETITIONS ==========")
         avg_trans_prob = np.mean(all_trans_probs, axis=2)
         avg_emission_means = np.mean(all_emission_means, axis=2)
         avg_emission_covs = np.mean(all_emission_covs, axis=3)
@@ -899,30 +557,14 @@ class CustomHMMClustering:
         avg_state_seq = np.apply_along_axis(lambda x: np.bincount(x.astype(int)).argmax(), axis=1, arr=all_state_seqs)
         avg_log_prob = np.mean(all_log_probs)
         avg_log_lik = np.mean(all_log_liks)
-        
-        print(f"[CUSTOM-HMM] Ensemble results:")
-        print(f"[CUSTOM-HMM] - Average log probability: {avg_log_prob:.3f}")
-        print(f"[CUSTOM-HMM] - Average log likelihood: {avg_log_lik:.3f}")
-        print(f"[CUSTOM-HMM] - Final transition matrix shape: {avg_trans_prob.shape}")
-        
         gamma_columns = [f'gamma_{i}' for i in range(num_base_states + 1)]
         self.array[gamma_columns] = self.avg_fs
-        print(f"[CUSTOM-HMM] Added gamma columns: {gamma_columns}")
 
-        # Store important attributes for validation
-        self.avg_trans_prob = avg_trans_prob
-        self.avg_state_seq = avg_state_seq
-        self.avg_log_lik = avg_log_lik
+        print(f"Selected clusters with average log probability: {avg_log_prob}")
 
-        print(f"[CUSTOM-HMM] Final state assignment...")
         self.array['labels'] = avg_state_seq
         self.labels_fin = self.array['labels']
         self.cluster_centres_fin = avg_emission_means[:num_base_states+1] * self.std + self.mean
-        
-        state_counts = np.bincount(self.labels_fin)
-        print(f"[CUSTOM-HMM] Final state distribution: {state_counts}")
-        print(f"[CUSTOM-HMM] ========== CUSTOM t-HMM CLUSTERING COMPLETED ==========")
-        
         
     def calculate_dictionary_clust_labels(self):
         unique_labels = sorted(self.array['labels'].unique())
@@ -1007,21 +649,16 @@ class CustomHMMClustering:
 
     def post_process_cluster_three(self, cluster_three_label=2, gamma_threshold=0.55):
         """
-        Improved: Reassign points in cluster 3 (the transition cluster) that have weak membership.
-        Use an adaptive threshold based on the distribution of gamma values.
+        Reassign points in cluster 3 (the transition cluster) that have weak membership.
+        If the gamma value for cluster 3 is below the gamma_threshold, reassign these points 
+        to the base cluster with the highest gamma among the base clusters.
         """
-        gamma_col = f'gamma_{cluster_three_label}'
-        gamma_vals = self.array[gamma_col]
-        # Use the 25th percentile as a dynamic threshold if not provided
-        if gamma_threshold is None:
-            gamma_threshold = np.percentile(gamma_vals, 25)
-        mask = (self.array['labels'] == cluster_three_label) & (gamma_vals < gamma_threshold)
+        mask = (self.array['labels'] == cluster_three_label) & (self.array[f'gamma_{cluster_three_label}'] < gamma_threshold)
         for idx in self.array[mask].index:
             base_gammas = [self.array.at[idx, f'gamma_{i}'] for i in range(cluster_three_label)]
             new_label = np.argmax(base_gammas)
             self.array.at[idx, 'labels'] = new_label
         self.calculate_dictionary_clust_labels()
-        print(f"Post-processed {mask.sum()} points from transitional state using gamma threshold {gamma_threshold:.3f}")
 
     def analyze_transitions(self, num_base_states, abrupt_gamma_threshold=0.6):
         self.array['transition_label'] = self.array['labels'].apply(lambda x: str(x + 1))
@@ -1269,90 +906,6 @@ class CustomHMMClustering:
         # === END NEW ===
         return self.array, self.dictionary_clust_labels, self.group_transitions, self.copy
 
-    def validate_transition_matrix(self, learned_trans, true_trans, align_states=True):
-        """
-        Compare the learned transition matrix to the true transition matrix.
-        Optionally align states using the Hungarian algorithm.
-        Returns a dict with error metrics and aligned matrices.
-        """
-        from scipy.optimize import linear_sum_assignment
-        import numpy as np
-        
-        learned = np.array(learned_trans)
-        true = np.array(true_trans)
-        
-        if align_states:
-            # Cost matrix: use Frobenius norm between rows
-            cost = np.zeros((learned.shape[0], true.shape[0]))
-            for i in range(learned.shape[0]):
-                for j in range(true.shape[0]):
-                    cost[i, j] = np.linalg.norm(learned[i] - true[j])
-            row_ind, col_ind = linear_sum_assignment(cost)
-            learned_aligned = learned[row_ind]
-            true_aligned = true[col_ind]
-        else:
-            learned_aligned = learned
-            true_aligned = true
-            
-        # Calculate error metrics
-        frob_norm = np.linalg.norm(learned_aligned - true_aligned)
-        abs_err = np.abs(learned_aligned - true_aligned)
-        max_err = np.max(abs_err)
-        mean_err = np.mean(abs_err)
-        
-        # Calculate KL divergence row-wise (for transition probabilities)
-        kl_divs = []
-        for i in range(learned_aligned.shape[0]):
-            # Add small epsilon to avoid log(0)
-            p = learned_aligned[i] + 1e-12
-            q = true_aligned[i] + 1e-12
-            kl = np.sum(p * np.log(p / q))
-            kl_divs.append(kl)
-        mean_kl = np.mean(kl_divs)
-        
-        return {
-            'frob_norm': frob_norm,
-            'max_err': max_err,
-            'mean_err': mean_err,
-            'mean_kl_divergence': mean_kl,
-            'learned_aligned': learned_aligned,
-            'true_aligned': true_aligned,
-            'abs_err': abs_err,
-            'alignment_indices': col_ind if align_states else None
-        }
-
-    def validate_state_sequence(self, decoded_seq, true_seq):
-        """
-        Compare the decoded state sequence to the true state sequence.
-        Returns accuracy and NMI after optimal alignment.
-        """
-        from sklearn.metrics import accuracy_score, normalized_mutual_info_score
-        from scipy.optimize import linear_sum_assignment
-        import numpy as np
-        
-        # Align states using Hungarian algorithm
-        n_states = max(max(decoded_seq), max(true_seq)) + 1
-        cost = np.zeros((n_states, n_states))
-        for i in range(n_states):
-            for j in range(n_states):
-                cost[i, j] = -np.sum((decoded_seq == i) & (true_seq == j))
-        
-        row_ind, col_ind = linear_sum_assignment(cost)
-        
-        # Remap decoded_seq
-        mapping = {row: col for row, col in zip(row_ind, col_ind)}
-        decoded_seq_aligned = np.array([mapping.get(s, s) for s in decoded_seq])
-        
-        acc = accuracy_score(true_seq, decoded_seq_aligned)
-        nmi = normalized_mutual_info_score(true_seq, decoded_seq_aligned)
-        
-        return {
-            'accuracy': acc, 
-            'nmi': nmi, 
-            'decoded_aligned': decoded_seq_aligned,
-            'state_mapping': mapping
-        }
-
 # =============================================================================|
 # Visualiser Class for Trajectory Plotting                                     |
 # =============================================================================|
@@ -1493,7 +1046,6 @@ class Visualiser:
 
     def save_transitions_to_file(self):
         """Save transition metadata to CSV file with per-transition condition frequencies"""
-
         transitions_list = []
         time_step = 28 * self.no_of_jumps  # Seconds between data points
         window_size = 2
@@ -1509,8 +1061,6 @@ class Visualiser:
             original_group = self.traj_transitions_dict_original.get(group_key, pd.DataFrame())
             if original_group.empty or 'Condition' not in original_group.columns:
                 continue
-
-
 
             for transition in transitions:
                 start_idx, end_idx, from_state, to_state, trans_type = transition
@@ -1579,87 +1129,81 @@ class Visualiser:
         if type(self.group_transitions) != list:
             self.save_transitions_to_file()
 
-    def validate_transition_matrix(self, learned_trans, true_trans, align_states=True):
-        """
-        Compare the learned transition matrix to the true transition matrix.
-        Optionally align states using the Hungarian algorithm.
-        Returns a dict with error metrics and aligned matrices.
-        """
-        from scipy.optimize import linear_sum_assignment
-        import numpy as np
-        
-        learned = np.array(learned_trans)
-        true = np.array(true_trans)
-        
-        if align_states:
-            # Cost matrix: use Frobenius norm between rows
-            cost = np.zeros((learned.shape[0], true.shape[0]))
-            for i in range(learned.shape[0]):
-                for j in range(true.shape[0]):
-                    cost[i, j] = np.linalg.norm(learned[i] - true[j])
-            row_ind, col_ind = linear_sum_assignment(cost)
-            learned_aligned = learned[row_ind]
-            true_aligned = true[col_ind]
-        else:
-            learned_aligned = learned
-            true_aligned = true
-            
-        # Calculate error metrics
-        frob_norm = np.linalg.norm(learned_aligned - true_aligned)
-        abs_err = np.abs(learned_aligned - true_aligned)
-        max_err = np.max(abs_err)
-        mean_err = np.mean(abs_err)
-        
-        # Calculate KL divergence row-wise (for transition probabilities)
-        kl_divs = []
-        for i in range(learned_aligned.shape[0]):
-            # Add small epsilon to avoid log(0)
-            p = learned_aligned[i] + 1e-12
-            q = true_aligned[i] + 1e-12
-            kl = np.sum(p * np.log(p / q))
-            kl_divs.append(kl)
-        mean_kl = np.mean(kl_divs)
-        
-        return {
-            'frob_norm': frob_norm,
-            'max_err': max_err,
-            'mean_err': mean_err,
-            'mean_kl_divergence': mean_kl,
-            'learned_aligned': learned_aligned,
-            'true_aligned': true_aligned,
-            'abs_err': abs_err,
-            'alignment_indices': col_ind if align_states else None
-        }
+# ==================================================================================|
+# Analysis Class                                                                    |
+# ==================================================================================|
 
-    def validate_state_sequence(self, decoded_seq, true_seq):
-        """
-        Compare the decoded state sequence to the true state sequence.
-        Returns accuracy and NMI after optimal alignment.
-        """
-        from sklearn.metrics import accuracy_score, normalized_mutual_info_score
-        from scipy.optimize import linear_sum_assignment
+class HMMAnalysis:
+    """
+    This class performs analysis for the custom HMM clustering method.
+    It iterates over different time‐step (jump) values, running the clustering
+    each time and computing stability and consistency measures.
+    """
+    def __init__(self, filelocation_TET, savelocation_TET, df_csv_file_original,
+                 feelings, principal_components, num_states, num_iterations, num_repetitions):
+        self.filelocation_TET = filelocation_TET
+        self.savelocation_TET = savelocation_TET
+        self.df_csv_file_original = df_csv_file_original
+        self.feelings = feelings
+        self.principal_components = principal_components
+        self.num_states = num_states
+        self.num_iterations = num_iterations
+        self.num_repetitions = num_repetitions
+
+    def hmm_diagnostics(simulated_labels, hmm_labels, hmm_trans_matrix, true_trans_matrix, gamma_vals=None, emission_means=None):
         import numpy as np
-        
-        # Align states using Hungarian algorithm
-        n_states = max(max(decoded_seq), max(true_seq)) + 1
-        cost = np.zeros((n_states, n_states))
-        for i in range(n_states):
-            for j in range(n_states):
-                cost[i, j] = -np.sum((decoded_seq == i) & (true_seq == j))
-        
-        row_ind, col_ind = linear_sum_assignment(cost)
-        
-        # Remap decoded_seq
-        mapping = {row: col for row, col in zip(row_ind, col_ind)}
-        decoded_seq_aligned = np.array([mapping.get(s, s) for s in decoded_seq])
-        
-        acc = accuracy_score(true_seq, decoded_seq_aligned)
-        nmi = normalized_mutual_info_score(true_seq, decoded_seq_aligned)
-        
-        return {
-            'accuracy': acc, 
-            'nmi': nmi, 
-            'decoded_aligned': decoded_seq_aligned,
-            'state_mapping': mapping
-        }
+        import matplotlib.pyplot as plt
+        import seaborn as sns
+        from scipy.spatial.distance import cdist
+
+        # 1. Empirical transition matrix from simulated labels
+        n_states = true_trans_matrix.shape[0]
+        sim_trans = np.zeros((n_states, n_states))
+        for i in range(len(simulated_labels)-1):
+            sim_trans[simulated_labels[i], simulated_labels[i+1]] += 1
+        sim_trans = sim_trans / sim_trans.sum(axis=1, keepdims=True)
+        print("Empirical transition matrix from simulated data:")
+        print(np.round(sim_trans, 2))
+        print("True transition matrix:")
+        print(np.round(true_trans_matrix, 2))
+        plt.figure(figsize=(10,4))
+        plt.subplot(1,2,1)
+        sns.heatmap(sim_trans, annot=True, fmt='.2f', cmap='Blues')
+        plt.title('Empirical Simulated Transition Matrix')
+        plt.subplot(1,2,2)
+        sns.heatmap(true_trans_matrix, annot=True, fmt='.2f', cmap='Blues')
+        plt.title('True Transition Matrix')
+        plt.tight_layout()
+        plt.savefig('transition_matrices_comparison.png')
+        plt.close()
+
+        # 2. HMM learned transition matrix
+        print("HMM learned transition matrix:")
+        print(np.round(hmm_trans_matrix, 2))
+        plt.figure(figsize=(5,4))
+        sns.heatmap(hmm_trans_matrix, annot=True, fmt='.2f', cmap='Blues')
+        plt.title('HMM Learned Transition Matrix')
+        plt.tight_layout()
+        plt.savefig('hmm_transition_matrix.png')
+        plt.close()
+
+        # 3. State occupancy
+        print("State occupancy (simulated):", np.bincount(simulated_labels) / len(simulated_labels))
+        print("State occupancy (HMM):", np.bincount(hmm_labels) / len(hmm_labels))
+
+        # 4. Average gamma for transition state
+        if gamma_vals is not None:
+            print("Average gamma (soft assignment) for each state:", np.mean(gamma_vals, axis=0))
+
+        # 5. Emission mean separation
+        if emission_means is not None:
+            dists = cdist(emission_means, emission_means)
+            print("Pairwise distances between emission means:")
+            print(np.round(dists, 2))
+            min_dist = np.min(dists + np.eye(len(emission_means))*1e6)
+            if min_dist < 0.5:
+                print("WARNING: Emission means are not well separated! Min distance:", min_dist)
+
+    # Usage example (call after HMM fitting):
+    # hmm_diagnostics(sim_states_full, state_seq, model.trans_prob, np.array(transition_matrix), gamma_vals=fs, emission_means=model.emission_means)
 
