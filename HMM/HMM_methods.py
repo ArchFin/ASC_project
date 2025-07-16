@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
-from itertools import combinations, product
+from itertools import combinations
 from scipy.spatial import distance
 from scipy.spatial.distance import cdist, euclidean
 from scipy.linalg import inv, det
@@ -13,7 +13,7 @@ from scipy.special import psi, polygamma, gamma
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
-from sklearn.metrics import silhouette_score, mean_squared_error
+from sklearn.metrics import silhouette_score
 import seaborn as sns
 import networkx as nx
 from statsmodels.tsa.stattools import acf
@@ -165,20 +165,14 @@ class principal_component_finder:
 # Custom HMM Model using multivariate t–distribution                           |
 # =============================================================================|
 class HMMModel:
-    def __init__(self, num_base_states, num_emissions, data=None, random_seed=12345, base_prior=0, extra_prior=0, transition_temp=0):
+    def __init__(self, num_base_states, num_emissions, data=None, random_seed=12345):
         """
         The model will have an extra state in addition to the base states.
         num_base_states: number of "pure" states.
         Total number of states = num_base_states + 1.
-        base_prior: Dirichlet prior for base state transitions (default 1.0)
-        extra_prior: Dirichlet prior for transitions involving the extra state (default 1.0)
-        transition_temp: temperature for softening transition matrix update (default 1.0)
         """
         self.num_base_states = num_base_states
         self.num_states = num_base_states + 1  # Extra state for transitions.
-        self.base_prior = base_prior
-        self.extra_prior = extra_prior
-        self.transition_temp = transition_temp
         np.random.seed(random_seed)
         random.seed(random_seed)
 
@@ -190,14 +184,18 @@ class HMMModel:
             # Base states get the k-means centers.
             self.emission_means[:num_base_states] = base_centers
             # Compute an offset based on spread of base centers.
-            offset = 0.2 * (np.max(base_centers, axis=0) - np.min(base_centers, axis=0))
+            offset = 0.05 * (np.max(base_centers, axis=0) - np.min(base_centers, axis=0))
             # Transitional state gets the average plus offset.
             self.emission_means[-1] = np.mean(base_centers, axis=0) - offset 
 
             # Diagonal-dominated initialization for transition probabilities.
-            base_prob = 0.2
-            self.trans_prob = np.eye(self.num_states) * base_prob + \
-                              np.ones((self.num_states, self.num_states)) * (1 - base_prob) / (self.num_states - 1)
+            base_prob = 0.7
+            extra_prob = 0.05  # Lower probability for transitional state
+            self.trans_prob = np.eye(self.num_states) * base_prob
+            self.trans_prob[-1, :] = extra_prob  # Transitional state row
+            self.trans_prob[:, -1] = extra_prob  # Transitional state column
+            self.trans_prob[-1, -1] = base_prob  # Transitional state self-transition
+            self.trans_prob += np.ones((self.num_states, self.num_states)) * (1 - base_prob - extra_prob) / (self.num_states - 2)
             self.trans_prob /= self.trans_prob.sum(axis=1, keepdims=True)
         else:
             self.emission_means = np.random.randn(self.num_states, num_emissions)
@@ -254,29 +252,21 @@ class HMMModel:
         return nu
 
     @staticmethod
-    def update_transition_probabilities(xi, num_states, base_prior=0, extra_prior=0, extra_self_prior=0, transition_temp=1.0):
+    def update_transition_probabilities(xi, num_states):
         """
         Use a Dirichlet prior with differential weights to encourage state persistence 
         and reduce transitions into/out of the extra state.
-        base_prior, extra_prior: user-settable priors for base and extra state transitions
-        transition_temp: temperature for softening transition matrix update
         """
-        # 1) start with base_prior everywhere
+        # Set a higher prior for base states and lower for the extra state.
+        base_prior = 2.0
+        extra_prior = 0.1
         prior = np.full((num_states, num_states), base_prior)
-
-        # 2) down‑weight any row or column involving the extra state
+        # For transitions involving the extra (last) state, use the extra_prior.
         prior[-1, :] = extra_prior
         prior[:, -1] = extra_prior
-
-        # 3) but make the extra→extra prior *very* small
-        prior[-1, -1] = extra_self_prior
-
-        # 4) add counts and apply temperature
+        prior[-1, -1] = base_prior
         trans_prob = np.sum(xi, axis=2) + prior
-        trans_prob = trans_prob ** (1.0 / transition_temp)
         trans_prob /= trans_prob.sum(axis=1, keepdims=True)
-
-
         return trans_prob
 
     @staticmethod
@@ -334,19 +324,11 @@ class HMMModel:
         gamma_vals /= gamma_vals.sum(axis=1, keepdims=True)
 
         for t in range(num_data - 1):
-            # build the unnormalized ξ_{i,j}(t)
-            # shape: (num_states, num_states)
-            unnorm = (
-                alpha[t, :][:, np.newaxis]
-                * self.trans_prob
-                * (emission_probs[t + 1, :] * beta[t + 1, :])[np.newaxis, :]
-            )
-            # full normalization over all i,j
-            denom = unnorm.sum()
-            if denom > 0:
-                xi[:, :, t] = unnorm / denom
-            else:
-                xi[:, :, t] = 0  # avoid division by zero
+            denominator = np.sum(alpha[t, :] @ self.trans_prob * emission_probs[t + 1, :] @ beta[t + 1, :])
+            if denominator == 0:
+                continue
+            xi[:, :, t] = (alpha[t, :].reshape(-1, 1) * self.trans_prob *
+                           (emission_probs[t + 1, :] * beta[t + 1, :])) / denominator
 
         return gamma_vals, xi
 
@@ -396,57 +378,35 @@ class HMMModel:
         
         return state_seq, log_prob 
 
-    def train(self, data, num_iterations, transition_contributions, transition_constraint_lim=0.5):
+    def train(self, data, num_iterations, transition_contributions):
         for iteration in range(num_iterations):
             print(f"Training iteration {iteration + 1} of {num_iterations}")
-            # 1) compute how hard to penalize inter‑state jumps this iteration
-            transition_constraint = max(
-                0.25,
-                1.0 - (1.0 - transition_constraint_lim) * (iteration / num_iterations)
-            )
-
-            # 2) E‑step: get soft counts xi[i,j,t]
+            # Gradually relax transition constraints.
+            transition_constraint = max(0.5, 1.0 - 0.5 * (iteration / num_iterations))
             gamma_vals, xi = self.e_step(data)
-
-            # 3) build a scaling mask that only down‑weights base⟷extra transitions
-            scaling = np.ones_like(xi)               # default = no scaling
-            # scale all (extra→base) and (base→extra) by the penalty factor:
+            
+            # Apply curriculum learning: scale transitions differently for the extra state.
+            scaling = np.ones_like(xi)
+            # Reduce contribution for transitions involving the extra state (last index).
             scaling[-1, :] = transition_constraint * transition_contributions
             scaling[:, -1] = transition_constraint * transition_contributions
-            # but then exempt the (extra→extra) self‑transition:
-            #scaling[-1, -1] = 0.01
-
-            # 4) apply scaling to your xi counts
             constrained_xi = xi * scaling
-
-            # 5) re‑estimate the transition matrix with your priors + temperature
-            self.trans_prob = self.update_transition_probabilities(
-                constrained_xi, self.num_states,
-                base_prior=self.base_prior,
-                extra_prior=self.extra_prior,
-                extra_self_prior=0,
-                transition_temp=self.transition_temp
-            )
-
-            # 6) clip & renormalize gammas, then M‑step for the emissions
+            
+            self.trans_prob = self.update_transition_probabilities(constrained_xi, self.num_states)
             gamma_vals = np.clip(gamma_vals, 1e-3, 1.0)
             gamma_vals /= gamma_vals.sum(axis=1, keepdims=True)
-            self.emission_means, \
-            self.emission_covs, \
-            self.nu = self.update_emission_parameters(
+            self.emission_means, self.emission_covs, self.nu = self.update_emission_parameters(
                 data, gamma_vals, self.num_states,
                 make_positive_definite=self.make_positive_definite,
                 estimate_nu=self.estimate_nu
             )
-
         return self.trans_prob, self.emission_means, self.emission_covs, self.nu
-
 
 # =============================================================================|
 # Custom Clustering Pipeline Using the Transition-State HMM Model              |
 # =============================================================================|
 class CustomHMMClustering:
-    def __init__(self, filelocation_TET, savelocation_TET, df_csv_file_original, feelings, principal_components, no_of_jumps, transition_contributions, base_prior=0, extra_prior=0, transition_temp=1.0, transition_constraint_lim=0.5):
+    def __init__(self, filelocation_TET, savelocation_TET, df_csv_file_original, feelings, principal_components, no_of_jumps, transition_contributions):
         self.filelocation_TET = filelocation_TET
         self.savelocation_TET = savelocation_TET
         self.df_csv_file_original = df_csv_file_original
@@ -455,10 +415,6 @@ class CustomHMMClustering:
         self.no_of_jumps = no_of_jumps
         self.has_week = 'Week' in df_csv_file_original.columns
         self.transition_contributions = transition_contributions
-        self.base_prior = base_prior
-        self.extra_prior = extra_prior
-        self.transition_temp = transition_temp
-        self.transition_constraint_lim = transition_constraint_lim
 
     def preprocess_data(self):
         group_keys = ['Subject', 'Week', 'Session'] if self.has_week else ['Subject', 'Session']
@@ -524,9 +480,9 @@ class CustomHMMClustering:
             seed = base_seed + rep
             np.random.seed(seed)
             random.seed(seed)
-            model = HMMModel(num_base_states, num_emissions=num_emissions, data=data_normalized, random_seed=seed,
-                             base_prior=self.base_prior, extra_prior=self.extra_prior, transition_temp=self.transition_temp)
-            model.train(data_normalized, num_iterations=num_iterations, transition_contributions = self.transition_contributions, transition_constraint_lim = self.transition_constraint_lim)
+            
+            model = HMMModel(num_base_states, num_emissions=num_emissions, data=data_normalized, random_seed=seed)
+            model.train(data_normalized, num_iterations=num_iterations, transition_contributions = self.transition_contributions)
             
             state_seq, log_prob = model.decode(data_normalized)
             _, _, fs, log_lik = model.forward_backward(data_normalized)
@@ -765,41 +721,26 @@ class CustomHMMClustering:
 
     def plot_transition_matrix(self):
         """
-        Plots the HMM’s *learned* transition probability matrix as a heatmap.
-        Falls back to empirical counts only if avg_trans_prob is missing.
+        Plots the average transition probability matrix as a heatmap.
         """
-        import os
-        import matplotlib.pyplot as plt
-        import seaborn as sns
-
-        if hasattr(self, 'avg_trans_prob'):
-            M = self.avg_trans_prob
-            plt.figure(figsize=(6, 5))
-            sns.heatmap(M, annot=True, fmt=".2f", cmap='Blues')
-            plt.xlabel('To State')
-            plt.ylabel('From State')
-            plt.title('Learned Transition Probability Matrix')
-            plt.tight_layout()
-            plt.savefig(os.path.join(self.savelocation_TET, 'learned_transition_matrix.png'))
-            plt.close()
-        else:
-            # fallback: empirical Viterbi counts
+        if hasattr(self, 'avg_fs') and hasattr(self, 'labels_fin') and hasattr(self, 'cluster_centres_fin'):
+            # Try to get avg_trans_prob from perform_clustering scope
             num_states = self.cluster_centres_fin.shape[0]
+            # Recompute transition matrix from labels
             trans_mat = np.zeros((num_states, num_states))
             labels = self.labels_fin.values if hasattr(self.labels_fin, 'values') else self.labels_fin
-            for i in range(len(labels) - 1):
-                trans_mat[labels[i], labels[i + 1]] += 1
+            for i in range(len(labels)-1):
+                trans_mat[labels[i], labels[i+1]] += 1
             row_sums = trans_mat.sum(axis=1, keepdims=True)
             row_sums[row_sums == 0] = 1
             trans_mat = trans_mat / row_sums
-
             plt.figure(figsize=(6, 5))
             sns.heatmap(trans_mat, annot=True, fmt=".2f", cmap='Blues')
             plt.xlabel('To State')
             plt.ylabel('From State')
             plt.title('Empirical Transition Probability Matrix')
             plt.tight_layout()
-            plt.savefig(os.path.join(self.savelocation_TET, 'empirical_transition_matrix.png'))
+            plt.savefig(os.path.join(self.savelocation_TET, 'transition_matrix_heatmap.png'))
             plt.close()
 
     def plot_state_duration_distribution(self):
@@ -855,9 +796,8 @@ class CustomHMMClustering:
         self.plot_results()
         self._plot_cluster_features()
         self._create_cluster_summary()
-        self.post_process_cluster_three(cluster_three_label=2, gamma_threshold=0.55)
-        if num_base_states == 3:
-            num_base_states = num_base_states - 1
+        # The transitional state is the last one, index `num_base_states`
+        self.post_process_cluster_three(cluster_three_label=num_base_states, gamma_threshold=0.85)
         self.analyze_transitions(num_base_states)
         # --- Added best-practice visualizations ---
         self.plot_state_sequence()
@@ -1130,12 +1070,12 @@ class Visualiser:
             self.save_transitions_to_file()
 
 # ==================================================================================|
-# Analysis Class                                                                    |
+# Jump Analysis Class (using raw feelings rather than differences like in k-means)  |
 # ==================================================================================|
 
-class HMMAnalysis:
+class HMMJumpAnalysis:
     """
-    This class performs analysis for the custom HMM clustering method.
+    This class performs jump analysis for the custom HMM clustering method.
     It iterates over different time‐step (jump) values, running the clustering
     each time and computing stability and consistency measures.
     """
@@ -1150,60 +1090,209 @@ class HMMAnalysis:
         self.num_iterations = num_iterations
         self.num_repetitions = num_repetitions
 
-    def hmm_diagnostics(simulated_labels, hmm_labels, hmm_trans_matrix, true_trans_matrix, gamma_vals=None, emission_means=None):
-        import numpy as np
-        import matplotlib.pyplot as plt
-        import seaborn as sns
-        from scipy.spatial.distance import cdist
+    def determine_optimal_jumps(self):
+        stability_scores = []
+        consistency_scores = []
+        
+        for jump in tqdm(range(1, 15), desc="Evaluating Jumps"):
+            # Train with current jump
+            cluster = CustomHMMClustering(..., no_of_jumps=jump)
+            cluster.run(num_states=self.num_states, num_iterations=self.num_iterations)
+            
+            # Calculate stability (ratio of dominant cluster)
+            counts = np.bincount(cluster.array['labels'])
+            stability = np.max(counts)/np.sum(counts)
+            
+            # Calculate consistency (agreement with full data)
+            full_cluster = CustomHMMClustering(..., no_of_jumps=1)
+            full_cluster.run(num_states=3)
+            consistency = np.mean(cluster.array['labels'] == full_cluster.array['labels'][::jump])
+            
+            stability_scores.append(stability)
+            consistency_scores.append(consistency)
+            
+        # Find optimal jump (max stability while maintaining >80% consistency)
+        optimal_jump = np.argmax([s*(c>0.8) for s,c in zip(stability_scores, consistency_scores)]) + 1
+        return optimal_jump
 
-        # 1. Empirical transition matrix from simulated labels
-        n_states = true_trans_matrix.shape[0]
-        sim_trans = np.zeros((n_states, n_states))
-        for i in range(len(simulated_labels)-1):
-            sim_trans[simulated_labels[i], simulated_labels[i+1]] += 1
-        sim_trans = sim_trans / sim_trans.sum(axis=1, keepdims=True)
-        print("Empirical transition matrix from simulated data:")
-        print(np.round(sim_trans, 2))
-        print("True transition matrix:")
-        print(np.round(true_trans_matrix, 2))
-        plt.figure(figsize=(10,4))
-        plt.subplot(1,2,1)
-        sns.heatmap(sim_trans, annot=True, fmt='.2f', cmap='Blues')
-        plt.title('Empirical Simulated Transition Matrix')
-        plt.subplot(1,2,2)
-        sns.heatmap(true_trans_matrix, annot=True, fmt='.2f', cmap='Blues')
-        plt.title('True Transition Matrix')
+    def determine_no_jumps_stability(self):
+        """
+        For each jump value, run HMM clustering and calculate the ratio between the count
+        of the dominant (most frequent) state and the sum of the counts of the other states.
+        Additionally, check whether the dominant state corresponds to the state with the smallest
+        magnitude (i.e. the smallest L2 norm of the emission mean). A plot is generated to display
+        the relationship between the number of time jumps and the stability measure.
+        """
+        y_labels = []
+        x_labels = []
+        
+        for jump in range(1, 30):
+            print(f"Processing jump value: {jump}")
+            # Run the HMM clustering with the current jump value.
+            hmm_cluster = CustomHMMClustering(
+                filelocation_TET=self.filelocation_TET,
+                savelocation_TET=self.savelocation_TET + str(jump),
+                df_csv_file_original=self.df_csv_file_original,
+                feelings=self.feelings,
+                principal_components=self.principal_components,
+                no_of_jumps=jump
+            )
+            # Run the complete clustering pipeline.
+            cluster_array, _ = hmm_cluster.run(self.num_states, self.num_iterations, self.num_repetitions)
+            
+            # Retrieve the state labels from the clustering output.
+            labels = cluster_array['labels'].values
+            unique, counts = np.unique(labels, return_counts=True)
+            label_counts = dict(zip(unique, counts))
+            print(f"For jump {jump}, cluster distribution: {label_counts}")
+            
+            # Determine the dominant cluster (with the highest count).
+            dominant_cluster = unique[np.argmax(counts)]
+            
+            # Calculate the magnitude (L2 norm) for each state's emission mean.
+            emission_means = hmm_cluster.cluster_centres_fin  # Averaged emission means from HMM clustering
+            magnitudes = [np.linalg.norm(emission_means[i]) for i in range(emission_means.shape[0])]
+            smallest_magnitude_state = np.argmin(magnitudes)
+            
+            if dominant_cluster == smallest_magnitude_state:
+                print("Dominant state matches the state with the smallest magnitude: True")
+            else:
+                print("Dominant state matches the state with the smallest magnitude: False")
+            
+            # Calculate the ratio of the dominant state's count to the sum of the other counts.
+            if sum(counts) - np.max(counts) > 0:
+                ratio = np.max(counts) / (sum(counts) - np.max(counts))
+            else:
+                ratio = np.nan
+            y_labels.append(ratio)
+            x_labels.append(jump)
+        
+        # Plot the stable cluster dominance ratio as a function of jump value.
+        plt.figure()
+        plt.plot(x_labels, y_labels, marker='o')
+        plt.title('Stable Cluster Dominance with Number of Time Jumps')
+        plt.xlabel('Number of Time Jumps')
+        plt.ylabel('Dominant Cluster Count : Other Clusters Count')
+        save_path = os.path.join(self.savelocation_TET, f'HMM_stable_cluster_dominance_jump.png')
+        plt.savefig(save_path)
+        
+    def determine_no_jumps_consistency(self):
+        """
+        For each jump value, this method measures the consistency of the HMM clustering.
+        The approach is to downsample the original data according to the jump value,
+        propagate the state labels to the original dataset, and then compute the proportion
+        of correct assignments based on the nearest emission mean. The ratio (Hughes' measure)
+        is plotted against the number of time jumps.
+        """
+        hughes_ratios = []
+        x_jumps = []
+        
+        for jump in range(1, 30):
+            print(f"Processing jump value for consistency: {jump}")
+            # Run HMM clustering with the current jump value.
+            hmm_cluster = CustomHMMClustering(
+                filelocation_TET=self.filelocation_TET,
+                savelocation_TET=self.savelocation_TET,
+                df_csv_file_original=self.df_csv_file_original,
+                feelings=self.feelings,
+                principal_components=self.principal_components,
+                no_of_jumps=jump
+            )
+            cluster_array, _ = hmm_cluster.run(self.num_states, self.num_iterations, self.num_repetitions)
+            labels_downsampled = cluster_array['labels'].values
+            emission_means = hmm_cluster.cluster_centres_fin
+            
+            # Downsample the original data and record original indices.
+            downsampled_groups = []
+            for (subject, week, session), group in self.df_csv_file_original.groupby(['Subject', 'Week', 'Session']):
+                group_ds = group.iloc[::jump].copy()
+                group_ds = group_ds[:-1]  # Ensure consistent length
+                group_ds['Original_Index'] = group_ds.index
+                downsampled_groups.append(group_ds)
+            df_downsampled = pd.concat(downsampled_groups)
+            # Assign the downsampled cluster labels.
+            df_downsampled['Cluster_Label'] = labels_downsampled
+            
+            # Initialise the Cluster_Label column in the original dataframe.
+            df_original = self.df_csv_file_original.copy()
+            df_original['Cluster_Label'] = np.nan
+            
+            # Propagate the downsampled labels back to the original data.
+            for _, row in df_downsampled.iterrows():
+                original_index = row['Original_Index']
+                label = row['Cluster_Label']
+                group_info = df_original.loc[original_index, ['Subject', 'Week', 'Session']]
+                group_mask = (
+                    (df_original['Subject'] == group_info['Subject']) &
+                    (df_original['Week'] == group_info['Week']) &
+                    (df_original['Session'] == group_info['Session'])
+                )
+                group_indices = df_original[group_mask].index.tolist()
+                pos_in_group = group_indices.index(original_index)
+                start_idx = pos_in_group - (pos_in_group % jump)
+                end_idx = min(start_idx + jump, len(group_indices))
+                for i in range(start_idx, end_idx):
+                    df_original.at[group_indices[i], 'Cluster_Label'] = label
+            
+            # Calculate Hughes' measure
+            correct = 0
+            total = 0
+            for idx, row in df_original.dropna(subset=['Cluster_Label']).iterrows():
+                true_label = row['Cluster_Label']
+                features = row[self.feelings].values
+                features_normalized = (features - hmm_cluster.mean) / hmm_cluster.std
+                distances = [euclidean(features_normalized, centre) 
+                        for centre in hmm_cluster.cluster_centres_fin]
+                predicted_label = np.argmin(distances)
+                if predicted_label == true_label:
+                    correct += 1
+                total += 1
+            
+            hughes_ratio = correct / total if total > 0 else np.nan
+            hughes_ratios.append(hughes_ratio)
+            x_jumps.append(jump)
+        
+        # Plot the consistency measure as a function of jump value.
+        plt.figure()
+        plt.plot(x_jumps, hughes_ratios, marker='o')
+        plt.title('HMM Cluster Consistency (Hughes Measure)')
+        plt.xlabel('Number of Time Jumps')
+        plt.ylabel('Correct Assignment Ratio')
+        save_path = os.path.join(self.savelocation_TET, f'HMM_consistency_plot.png')
+        plt.savefig(save_path)
+        
+    def determine_no_of_jumps_autocorrelation(self):
+        """
+        Compute the average autocorrelation function (ACF) for each feeling across all subjects,
+        weeks and sessions, using a fixed number of lags. A plot is generated to display the
+        average ACF for each feeling.
+        """
+        split_dict = {}
+        # Group by Subject, Week and Session.
+        for (subject, week, session), group in self.df_csv_file_original.groupby(['Subject', 'Week', 'Session']):
+            split_dict[(subject, week, session)] = group[self.feelings].copy()
+        
+        acf_results = {feeling: [] for feeling in self.feelings}
+        n_lags = 30  # Number of lags
+        
+        for key, df in split_dict.items():
+            for feeling in self.feelings:
+                acf_vals = acf(df[feeling], nlags=n_lags, fft=True)
+                acf_results[feeling].append(acf_vals)
+        
+        # Average the autocorrelation values for each feeling.
+        acf_averages = {feeling: np.mean(np.vstack(acf_results[feeling]), axis=0) for feeling in self.feelings}
+        
+        plt.figure(figsize=(12, 8))
+        for feeling, acf_vals in acf_averages.items():
+            plt.plot(acf_vals, label=feeling)
+        
+        plt.title('Average Autocorrelation Function for Each Feeling')
+        plt.xlabel('Lag')
+        plt.ylabel('Autocorrelation')
+        plt.legend(title='Feeling', loc='upper right')
+        plt.grid(True)
         plt.tight_layout()
-        plt.savefig('transition_matrices_comparison.png')
-        plt.close()
-
-        # 2. HMM learned transition matrix
-        print("HMM learned transition matrix:")
-        print(np.round(hmm_trans_matrix, 2))
-        plt.figure(figsize=(5,4))
-        sns.heatmap(hmm_trans_matrix, annot=True, fmt='.2f', cmap='Blues')
-        plt.title('HMM Learned Transition Matrix')
-        plt.tight_layout()
-        plt.savefig('hmm_transition_matrix.png')
-        plt.close()
-
-        # 3. State occupancy
-        print("State occupancy (simulated):", np.bincount(simulated_labels) / len(simulated_labels))
-        print("State occupancy (HMM):", np.bincount(hmm_labels) / len(hmm_labels))
-
-        # 4. Average gamma for transition state
-        if gamma_vals is not None:
-            print("Average gamma (soft assignment) for each state:", np.mean(gamma_vals, axis=0))
-
-        # 5. Emission mean separation
-        if emission_means is not None:
-            dists = cdist(emission_means, emission_means)
-            print("Pairwise distances between emission means:")
-            print(np.round(dists, 2))
-            min_dist = np.min(dists + np.eye(len(emission_means))*1e6)
-            if min_dist < 0.5:
-                print("WARNING: Emission means are not well separated! Min distance:", min_dist)
-
-    # Usage example (call after HMM fitting):
-    # hmm_diagnostics(sim_states_full, state_seq, model.trans_prob, np.array(transition_matrix), gamma_vals=fs, emission_means=model.emission_means)
+        save_path = os.path.join(self.savelocation_TET, f'HMM_autocorrelation.png')
+        plt.savefig(save_path)
 

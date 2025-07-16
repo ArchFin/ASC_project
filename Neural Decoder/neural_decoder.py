@@ -28,7 +28,7 @@ import numpy as np
 import pandas as pd
 
 # Scikit-learn utilities for splitting, scaling, encoding labels, and metrics
-from sklearn.model_selection import train_test_split, KFold
+from sklearn.model_selection import train_test_split, GroupKFold
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.metrics import roc_auc_score, confusion_matrix
 
@@ -96,31 +96,48 @@ def clean_impute(X, threshold=2.5):
     return X
 
 
-def preprocess(X, y, test_size=0.2, random_state=42):
+def preprocess(X_train, X_test, y_train, y_test, random_state=42):
     """
-    1. Clean and impute X.
+    1. Clean and impute X_train and X_test separately.
     2. Align y to the cleaned X indices.
-    3. Shuffle data.
-    4. Standardize features to zero mean, unit variance (using StandardScaler).
-    5. Label-encode y, then convert to one-hot (to_categorical).
-    6. Split into training and test sets (stratified to preserve class proportions).
-    Returns: X_train, X_test, Y_train (one-hot), Y_test (one-hot), label encoder, classes.
+    3. Shuffle training data.
+    4. Standardize features: fit on X_train, transform both X_train and X_test.
+    5. Label-encode y: fit on y_train, transform both y_train and y_test.
+    6. Convert y to one-hot vectors.
+    Returns: X_train_scaled, X_test_scaled, Y_train_onehot, Y_test_onehot, label_encoder, classes.
     """
-    X_clean = clean_impute(X)
-    y_clean = y.loc[X_clean.index]
-    Xs, ys = shuffle(X_clean, y_clean, random_state=random_state)
+    # Clean and impute training data
+    X_train_clean = clean_impute(X_train)
+    y_train_clean = y_train.loc[X_train_clean.index]
 
+    # Clean and impute test data
+    X_test_clean = clean_impute(X_test)
+    if X_test_clean.empty:
+        print("Warning: Test set became empty after cleaning. Skipping this fold.")
+        # Return empty arrays and a flag to signal skipping
+        return None, None, None, None, None, None
+
+    y_test_clean = y_test.loc[X_test_clean.index]
+
+    # Shuffle training data
+    X_train_shuffled, y_train_shuffled = shuffle(X_train_clean, y_train_clean, random_state=random_state)
+
+    # Fit scaler ONLY on training data, then transform both
     scaler = StandardScaler()
-    Xs = scaler.fit_transform(Xs)  # Each feature now has mean=0, std=1
+    X_train_scaled = scaler.fit_transform(X_train_shuffled)
+    X_test_scaled = scaler.transform(X_test_clean)
 
+    # Fit label encoder ONLY on training labels, then transform both
     le = LabelEncoder()
-    y_enc = le.fit_transform(ys)   # Integer encode labels
-    Y = to_categorical(y_enc)      # Convert to one-hot vectors
+    y_train_enc = le.fit_transform(y_train_shuffled)
+    y_test_enc = le.transform(y_test_clean)
 
-    X_train, X_test, Y_train, Y_test = train_test_split(
-        Xs, Y, test_size=test_size, random_state=random_state, stratify=y_enc
-    )
-    return X_train, X_test, Y_train, Y_test, le, le.classes_
+    # Convert to one-hot vectors
+    Y_train_onehot = to_categorical(y_train_enc)
+    Y_test_onehot = to_categorical(y_test_enc, num_classes=len(le.classes_))
+
+    # Return all processed sets and the fitted encoder
+    return X_train_scaled, X_test_scaled, Y_train_onehot, Y_test_onehot, le, le.classes_
 
 
 def build_model(input_dim, num_classes, hp=None):
@@ -170,7 +187,7 @@ def build_model(input_dim, num_classes, hp=None):
     model.compile(
         optimizer=Adam(learning_rate=lr),
         loss='categorical_crossentropy',
-        metrics=['accuracy']
+        metrics=['accuracy', tf.keras.metrics.AUC(name='auc', multi_label=True)]
     )
     return model
 
@@ -186,19 +203,24 @@ def tune_hyperparameters(X_train, Y_train, X_val, Y_val):
     def model_fn(hp):
         return build_model(X_train.shape[1], Y_train.shape[1], hp)
 
-    tuner = kt.RandomSearch(
+    tuner = kt.Hyperband(  # Use Hyperband for more efficient search
         model_fn,
-        objective='val_loss',
-        max_trials=10,
-        executions_per_trial=1,
+        objective='val_auc',
+        max_epochs=50, # max_epochs instead of epochs for Hyperband
+        factor=3,
         directory='tuner_dir',
-        project_name='three_state'
+        project_name='three_state_hyperband'
     )
+
+    # Add EarlyStopping to the tuner search
+    stop_early = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=5)
+
     tuner.search(
         X_train, Y_train,
-        epochs=20,
+        epochs=50,
         validation_data=(X_val, Y_val),
-        verbose=0
+        verbose=1,
+        callbacks=[stop_early] # Add callback here
     )
     best_hp = tuner.get_best_hyperparameters(num_trials=1)[0]
     best_model = tuner.hypermodel.build(best_hp)
@@ -513,8 +535,11 @@ def evaluate_and_save(model, X_test, Y_test, label_names, out_dir='results'):
     true = Y_test.argmax(axis=1)        # True class indices
 
     # 2) Confusion matrix (counts + percentage)
-    cm = confusion_matrix(true, preds)
-    cm_pct = cm.astype(float) / cm.sum(axis=1, keepdims=True) * 100
+    labels = range(len(label_names))
+    cm = confusion_matrix(true, preds, labels=labels)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        cm_pct = cm.astype(float) / cm.sum(axis=1, keepdims=True) * 100
+        cm_pct = np.nan_to_num(cm_pct) # Replace NaNs (from division by zero) with 0
 
     print("Confusion Matrix (counts):\n", cm)
     print("Confusion Matrix (percentages):\n", np.round(cm_pct, 2))
@@ -564,269 +589,322 @@ def evaluate_and_save(model, X_test, Y_test, label_names, out_dir='results'):
 
 def main():
     """
-    Orchestrates the full pipeline:
+    Orchestrates a full cross-validation pipeline:
     1. Load raw data from CSV.
-    2. Drop unwanted columns and select features.
-    3. Rename columns to meaningful names (e.g., 'psd global offset').
-    4. Preprocess (clean, impute, scale, one-hot encode, train/test split).
-    5. Compute class weights for imbalanced labels.
-    6. Hyperparameter tuning (RandomSearch with keras_tuner).
-    7. Retrain best model on full training set.
-    8. Evaluate & save confusion matrix + AUC.
-    9. Perform cluster-based analysis on entire dataset.
-    10. Save final model and label encoder.
+    2. Define features and prepare data.
+    3. Use GroupKFold to split data by subject, ensuring no subject leakage.
+    4. For each fold:
+        a. Preprocess (clean, impute, scale, one-hot encode).
+        b. Tune hyperparameters on a validation set split from the training data.
+        c. Train the best model on the full training data for that fold.
+        d. Evaluate on the test set for that fold and store metrics.
+    5. Aggregate and report the average performance (AUC, confusion matrix) across all folds.
+    6. Retrain the best overall model on the entire dataset and save it.
     """
     csv_path = '/Users/a_fin/Desktop/Year 4/Project/Data/neural_data_complete_2.csv'
-    drop_cols = ['subject', 'week', 'run', 'epoch', 'number']
+    
+    # 1. Load data and define groups for cross-validation
+    df = pd.read_csv(csv_path)
+    # Exclude subjects s10 and s19
+    subjects_to_exclude = ['s10', 's19']
+    df = df[~df['subject'].isin(subjects_to_exclude)]
+    print(f"Excluding subjects: {subjects_to_exclude}. Remaining subjects: {df['subject'].unique()}")
 
-    # 1. Load data, drop metadata columns
-    X, y = load_data(csv_path=csv_path, drop_cols=drop_cols)
+    groups = df['subject']  # Use subject IDs for grouped splitting
+    y = df['transition_label']
+    
+    # Define features and drop metadata
+    drop_cols = ['subject', 'week', 'run', 'epoch', 'number', 'transition_label']
+    X_raw = df.drop(columns=drop_cols, errors='ignore')
+    X_raw = select_features(X_raw, pattern_keep=['glob_chans'])
 
-    # 2. Select only features containing 'glob' (global channel metrics)
-    X = select_features(X, pattern_keep=['glob_chans'])
+    # Define a function to rename features (for reusability)
+    def rename_features(X):
+        original_columns = X.columns.tolist()
+        # Create new columns with shorter names
+        X['psd global offset']    = X['psd_metrics_combined_avg__Offset_glob_chans']
+        X['wSMI 2 global']        = X['wsmi_2_global_2__wSMI_glob_chans']
+        X['psd global gamma']     = X['psd_metrics_combined_avg__Gamma_Power_glob_chans']
+        X['wSMI 4 global']        = X['wsmi_4_global_2__wSMI_glob_chans']
+        X['psd global beta']      = X['psd_metrics_combined_avg__Beta_Power_glob_chans']
+        X['psd global exponent']  = X['psd_metrics_combined_avg__Exponent_glob_chans']
+        X['wSMI 8 global']        = X['wsmi_8_global_2__wSMI_glob_chans']
+        X['psd global delta']     = X['psd_metrics_combined_avg__Delta_Power_glob_chans']
+        X['psd global alpha']     = X['psd_metrics_combined_avg__Alpha_Power_glob_chans']
+        X['wSMI 1 global']        = X['wsmi_1_global_2__wSMI_glob_chans']
+        X['LZC global']           = X['lz_metrics_combined_LZc__glob_chans']
+        X['LZsum global']         = X['lz_metrics_combined_LZsum__glob_chans']
+        X['psd global theta']     = X['psd_metrics_combined_avg__Theta_Power_glob_chans']
+        X['pe 2 global']          = X['pe_metrics_combined_2_wide__glob_chans']
+        X['pe 1 global']          = X['pe_metrics_combined_1_wide__glob_chans']
+        X['pe 4 global']          = X['pe_metrics_combined_4_wide__glob_chans']
+        X['pe 8 global']          = X['pe_metrics_combined_8_wide__glob_chans']
+        X = X.drop(columns=original_columns)
+        return X
 
-    # Keep a copy of original column names
-    columns = X.columns
+    X = rename_features(X_raw)
 
-    # 3. Rename columns to shorter, more interpretable feature names
-    X['psd global offset']    = X['psd_metrics_combined_avg__Offset_glob_chans']
-    X['wSMI 2 global']        = X['wsmi_2_global_2__wSMI_glob_chans']
-    X['psd global gamma']     = X['psd_metrics_combined_avg__Gamma_Power_glob_chans']
-    X['wSMI 4 global']        = X['wsmi_4_global_2__wSMI_glob_chans']
-    X['psd global beta']      = X['psd_metrics_combined_avg__Beta_Power_glob_chans']
-    X['psd global exponent']  = X['psd_metrics_combined_avg__Exponent_glob_chans']
-    X['wSMI 8 global']        = X['wsmi_8_global_2__wSMI_glob_chans']
-    X['psd global delta']     = X['psd_metrics_combined_avg__Delta_Power_glob_chans']
-    X['psd global alpha']     = X['psd_metrics_combined_avg__Alpha_Power_glob_chans']
-    X['wSMI 1 global']        = X['wsmi_1_global_2__wSMI_glob_chans']
-    X['LZC global']           = X['lz_metrics_combined_LZc__glob_chans']
-    X['LZsum global']         = X['lz_metrics_combined_LZsum__glob_chans']
-    # (Optionally drop SMI columns if not needed)
-    # X['SMI 1 global'] = X['wsmi_1_global_2__SMI_glob_chans']
-    # X['SMI 2 global'] = X['wsmi_2_global_2__SMI_glob_chans']
-    # X['SMI 8 global'] = X['wsmi_8_global_2__SMI_glob_chans']
-    # X['SMI 4 global'] = X['wsmi_4_global_2__SMI_glob_chans']
-    X['psd global theta']     = X['psd_metrics_combined_avg__Theta_Power_glob_chans']
-    X['pe 2 global']          = X['pe_metrics_combined_2_wide__glob_chans']
-    X['pe 1 global']          = X['pe_metrics_combined_1_wide__glob_chans']
-    X['pe 4 global']          = X['pe_metrics_combined_4_wide__glob_chans']
-    X['pe 8 global']          = X['pe_metrics_combined_8_wide__glob_chans']
+    # 2. Set up GroupKFold Cross-Validation
+    n_splits = len(df['subject'].unique())
+    gkf = GroupKFold(n_splits=n_splits)
+    
+    all_aucs = []
+    all_cms = []
+    fold_num = 0
 
-    # Drop original long column names, keep only the renamed ones
-    X.drop(columns=columns, inplace=True)
+    print(f"Starting {n_splits}-fold cross-validation...")
 
-    # 4. Preprocess: clean, impute, scale, encode labels, split into train/test
-    X_train, X_test, Y_train, Y_test, le, label_names = preprocess(X, y)
+    for train_idx, test_idx in gkf.split(X, y, groups=groups):
+        fold_num += 1
+        print(f"\n===== FOLD {fold_num}/{n_splits} =====")
+        
+        # 3. Split data for the current fold
+        X_train, X_test = X.iloc[train_idx], X.iloc[test_idx]
+        y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
+        
+        test_subjects = df['subject'].iloc[test_idx].unique()
+        print(f"Testing on subjects: {test_subjects}")
 
-    # 5. Compute class weights to address imbalanced classes
-    from sklearn.utils.class_weight import compute_class_weight
-    y_train_labels = np.argmax(Y_train, axis=1)
-    class_weights_array = compute_class_weight(
-        'balanced', classes=np.unique(y_train_labels), y=y_train_labels
-    )
-    class_weights = {i: w for i, w in enumerate(class_weights_array)}
-
-    # 6. Hyperparameter tuning
-    # Split training set further into a training/validation split
-    X_tr, X_val, Y_tr, Y_val = train_test_split(
-        X_train, Y_train, test_size=0.3, random_state=42, stratify=y_train_labels
-    )
-    best_model, best_hp = tune_hyperparameters(X_tr, Y_tr, X_val, Y_val)
-
-    # 7. Retrain best model on the full training set
-    callbacks = [
-        EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True),
-        ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=3)
-    ]
-    best_model.fit(
-        X_train, Y_train,
-        epochs=250,
-        batch_size=256,
-        validation_data=(X_test, Y_test),
-        callbacks=callbacks,
-        class_weight=class_weights,
-        verbose=1
-    )
-
-    # 8. Evaluate & save confusion matrix + AUC plots for the tuned model
-    cm, aucs = evaluate_and_save(
-        best_model,
-        X_test, Y_test,
-        label_names,
-        out_dir=f'/Users/a_fin/Desktop/Year 4/Project/Data/'
-    )
-
-    # —————————————————————————————— 8.5 MANUAL PERMUTATION‐IMPORTANCE ——————————————————————————————
-
-    # Compute baseline accuracy on X_test once (no shuffling).
-    # 1) True labels as integers 0…(num_classes−1)
-    y_test_labels = Y_test.argmax(axis=1)
-
-    # 2) Baseline predictions & accuracy
-    probs_baseline = best_model.predict(X_test)
-    preds_baseline = probs_baseline.argmax(axis=1)
-    baseline_acc = (preds_baseline == y_test_labels).mean()
-    print(f"Baseline test accuracy (no shuffling): {baseline_acc:.4f}")
-
-    # 3) Prepare DataFrame form of X_test (so we can shuffle columns by name)
-    feature_names = X.columns.tolist()   # X is the original DataFrame of all renamed features
-    X_test_df = pd.DataFrame(X_test, columns=feature_names)
-
-    # 4) For each feature, shuffle it n_repeats times and measure accuracy drop
-    n_repeats = 10
-    perm_importances = np.zeros(len(feature_names))
-    perm_std       = np.zeros(len(feature_names))
-
-    # Loop over feature indices
-    for j, feat in enumerate(feature_names):
-        acc_drops = []
-        for _ in range(n_repeats):
-            # Make a copy of X_test_df and shuffle **only** column `feat`
-            X_shuffled = X_test_df.copy()
-            X_shuffled[feat] = np.random.permutation(X_shuffled[feat].values)
-
-            # Predict with the model on the shuffled data
-            probs_perm = best_model.predict(X_shuffled.values)
-            preds_perm = probs_perm.argmax(axis=1)
-            acc_perm   = (preds_perm == y_test_labels).mean()
-
-            # Accuracy drop = baseline_acc − acc_perm
-            acc_drops.append(baseline_acc - acc_perm)
-
-        # Store the mean and std of the drops
-        perm_importances[j] = np.mean(acc_drops)
-        perm_std[j] = np.std(acc_drops)
-
-    # 5) Sort features by mean accuracy drop (descending)
-    idx_sorted = np.argsort(perm_importances)[::-1]
-    sorted_feats = [feature_names[i] for i in idx_sorted]
-    sorted_means = perm_importances[idx_sorted]
-    sorted_stds  = perm_std[idx_sorted]
-
-    # 6) Plot a bar chart of (mean drop ± std) for each feature
-    plt.figure(figsize=(12, 6))
-    plt.bar(range(len(sorted_feats)), sorted_means, yerr=sorted_stds, align='center')
-    plt.xticks(range(len(sorted_feats)), sorted_feats, rotation=90)
-    plt.ylabel("Mean accuracy drop (± std) after shuffling")
-    plt.title("Permutation‐Importance of Each Feature")
-    plt.tight_layout()
-
-    perm_path = os.path.join(f'/Users/a_fin/Desktop/Year 4/Project/Data/', 'permutation_importance.png')
-    os.makedirs(os.path.dirname(perm_path), exist_ok=True)
-    plt.savefig(perm_path)
-    plt.close()
-    print(f"Saved manual permutation‐importance plot → {perm_path}")
-
-    # 7) Optionally, print top 5 features
-    print("Top 5 features by permutation‐importance (manual):")
-    for i in range(min(5, len(sorted_feats))):
-        print(f"  {i+1}. {sorted_feats[i]} (mean drop = {sorted_means[i]:.4f} ± {sorted_stds[i]:.4f})")
-
-    # —————————————————————————————————————————————————————————————— 
-
-        # —————————————————————————————— 8.75 SHAP EXPLANATIONS (FIXED) ——————————————————————————————
-
-    # Pick a small background set (e.g. up to 100 random training samples)
-    np.random.seed(42)
-    bg_indices = np.random.choice(X_train.shape[0], size=min(100, X_train.shape[0]), replace=False)
-    X_background = X_train[bg_indices]
-
-    # 1) Create the DeepExplainer
-    # If you see a “DeepExplainer with TensorFlow eager mode” error, you can uncomment:
-    #    tf.compat.v1.disable_eager_execution()
-    explainer = shap.DeepExplainer(best_model, X_background)
-
-    # 2) Select a modest subset of X_test to explain (up to 100 points)
-    test_indices = np.random.choice(X_test.shape[0], size=min(100, X_test.shape[0]), replace=False)
-    X_shap = X_test[test_indices]
-
-    # 3) Compute SHAP values
-    shap_values = explainer.shap_values(X_shap)
-
-    # 4) Convert shap_values into a single “mean |SHAP| per feature” vector of length = n_features
-    if isinstance(shap_values, list):
-        # shap_values is a list of length = n_classes; each entry is (n_samples, n_features)
-        # Compute per-class mean(|shap|)
-        mean_abs_per_class = [np.abs(cls_shap).mean(axis=0) for cls_shap in shap_values]
-        # Now average over classes → result shape = (n_features,)
-        shap_abs_mean = np.mean(mean_abs_per_class, axis=0)
-
-    else:
-        # shap_values is a single ndarray. Possible shapes:
-        #  - (n_samples, n_features)        (binary or single-output)
-        #  - (n_classes, n_samples, n_features)   (multi-output packed into one array)
-        arr = np.array(shap_values)
-        if arr.ndim == 2:
-            # Only one output dimension: arr.shape = (n_samples, n_features)
-            shap_abs_mean = np.abs(arr).mean(axis=0)
-
-        elif arr.ndim == 3:
-            # Either (n_classes, n_samples, n_features) or (n_samples, n_features, n_classes).
-            # We check which axis corresponds to n_classes by comparing to label_names.
-            n_classes = len(label_names)
-            if arr.shape[0] == n_classes and arr.shape[2] != n_classes:
-                # arr.shape = (n_classes, n_samples, n_features)
-                # → take absolute, then mean over samples (axis=1), then mean over classes (axis=0)
-                shap_abs_mean = np.mean(np.abs(arr), axis=(0, 1))
-            elif arr.shape[2] == n_classes and arr.shape[0] != n_classes:
-                # arr.shape = (n_samples, n_features, n_classes)
-                # → take absolute, then mean over classes (axis=2), then mean over samples (axis=0)
-                temp = np.abs(arr).mean(axis=2)   # shape = (n_samples, n_features)
-                shap_abs_mean = temp.mean(axis=0) # shape = (n_features,)
-            else:
-                raise ValueError(f"Unexpected shap_values.shape = {arr.shape}. Cannot infer class axis.")
-        else:
-            raise ValueError(f"Unexpected shap_values.ndim = {arr.ndim}. Expected 2 or 3.")
-
-    # 5) Now shap_abs_mean is guaranteed to have length = n_features
-    feature_names = X.columns.tolist()
-    if shap_abs_mean.shape[0] != len(feature_names):
-        raise ValueError(
-            f"SHAP‐output size mismatch: got {shap_abs_mean.shape[0]} features but expected {len(feature_names)}."
+        # 4. Preprocess data for the fold
+        X_train_p, X_test_p, Y_train_p, Y_test_p, le, label_names = preprocess(
+            X_train, X_test, y_train, y_test
         )
 
-    # 6) Sort features by average |SHAP|
-    idx_shap = np.argsort(shap_abs_mean)[::-1]
-    sorted_feats_shap = [feature_names[i] for i in idx_shap]
-    sorted_shap_vals   = shap_abs_mean[idx_shap]
+        # If preprocessing fails (e.g., empty test set), skip fold
+        if X_train_p is None:
+            continue
 
-    # 7) Plot a bar chart of average |SHAP| per feature
-    plt.figure(figsize=(12, 6))
-    plt.bar(range(len(feature_names)), sorted_shap_vals, align='center')
-    plt.xticks(range(len(feature_names)), sorted_feats_shap, rotation=90)
-    plt.ylabel("Mean(|SHAP value|)")
-    plt.title("Global SHAP‐Importance (average over all classes)")
-    plt.tight_layout()
+        # 5. Hyperparameter Tuning for the fold
+        X_tr, X_val, Y_tr, Y_val = train_test_split(
+            X_train_p, Y_train_p, test_size=0.2, random_state=42, stratify=np.argmax(Y_train_p, axis=1)
+        )
+        best_model, best_hp = tune_hyperparameters(X_tr, Y_tr, X_val, Y_val)
+        print(f"Best hyperparameters for fold {fold_num}: {best_hp.values}")
 
-    shap_path = os.path.join(f'/Users/a_fin/Desktop/Year 4/Project/Data/', 'shap_global_importance.png')
-    os.makedirs(os.path.dirname(shap_path), exist_ok=True)
-    plt.savefig(shap_path)
-    plt.close()
-    print(f"Saved SHAP global importance bar chart → {shap_path}")
+        # 6. Train the best model on the full training set for this fold
+        callbacks = [EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)]
+        best_model.fit(
+            X_train_p, Y_train_p,
+            epochs=250,
+            batch_size=256,
+            validation_data=(X_test_p, Y_test_p),
+            callbacks=callbacks,
+            verbose=0  # Keep training output clean
+        )
 
-    # ——————————————————————————————————————————————————————————————
+        # 7. Evaluate and store results for the fold
+        cm, aucs = evaluate_and_save(
+            best_model, X_test_p, Y_test_p, label_names, out_dir=f'results/fold_{fold_num}'
+        )
+        all_cms.append(cm)
+        all_aucs.append(aucs)
 
-    # 9. Cluster analysis on the full cleaned dataset
-    scaler = StandardScaler()
-    X_clean = clean_impute(X)
-    scaler.fit(X_clean)
-    X_scaled = pd.DataFrame(
-        scaler.transform(X_clean),
-        columns=X_clean.columns, index=X_clean.index
+    # 8. Aggregate and report final results
+    print("\n===== CROSS-VALIDATION COMPLETE =====")
+    
+    # Sum confusion matrices for an overall view
+    total_cm = np.sum(all_cms, axis=0)
+    total_cm_percent = total_cm.astype('float') / total_cm.sum(axis=1, keepdims=True) * 100
+    print("Overall Confusion Matrix (counts):\n", total_cm)
+    print("Overall Confusion Matrix (percentages):\n", np.round(total_cm_percent, 2))
+
+    # Average AUC scores
+    avg_aucs = pd.DataFrame(all_aucs).mean()
+    std_aucs = pd.DataFrame(all_aucs).std()
+    print("\nAverage AUC per class across all folds:")
+    for label in avg_aucs.index:
+        print(f"  Class {label}: {avg_aucs[label]:.3f} ± {std_aucs[label]:.3f}")
+
+    # 9. Retrain final model on all data (optional, for deployment)
+    print("\nRetraining final model on all data with best hyperparameters from first fold...")
+    # Preprocess all data
+    X_all_p, _, Y_all_p, _, le, final_label_names = preprocess(X, X, y, y)
+    
+    # Build model with best HPs found in the first fold (or you could average them)
+    final_model = build_model(X_all_p.shape[1], Y_all_p.shape[1], hp=best_hp)
+    final_model.fit(X_all_p, Y_all_p, epochs=100, batch_size=256, verbose=0)
+
+    # Evaluate the final model on the full dataset it was trained on
+    print("\n===== FINAL MODEL PERFORMANCE (ON ALL DATA) =====")
+    evaluate_and_save(
+        final_model, X_all_p, Y_all_p, final_label_names, out_dir='results/final_model'
     )
-    analyze_cluster_averages(
-        X_scaled,
-        best_model,
-        label_names,
-        le=le,
-        out_dir=f'/Users/a_fin/Desktop/Year 4/Project/Data/'
-    )
+    
+    # Save the final model and encoder
+    final_model.save('final_neural_decoder_model.h5')
+    joblib.dump(le, 'final_label_encoder.pkl')
 
-    # 10. Save the final tuned model and label encoder for future inference
-    best_model.save('neural_decoder_model.h5')
-    joblib.dump(le, 'label_encoder.pkl')
-    print('Saved tuned model → neural_decoder_model.h5')
-    print('Saved label encoder → label_encoder.pkl')
+    # # —————————————————————————————— 8.5 MANUAL PERMUTATION‐IMPORTANCE ——————————————————————————————
+
+    # # Compute baseline accuracy on X_test once (no shuffling).
+    # # 1) True labels as integers 0…(num_classes−1)
+    # y_test_labels = Y_test.argmax(axis=1)
+
+    # # 2) Baseline predictions & accuracy
+    # probs_baseline = best_model.predict(X_test)
+    # preds_baseline = probs_baseline.argmax(axis=1)
+    # baseline_acc = (preds_baseline == y_test_labels).mean()
+    # print(f"Baseline test accuracy (no shuffling): {baseline_acc:.4f}")
+
+    # # 3) Prepare DataFrame form of X_test (so we can shuffle columns by name)
+    # feature_names = X_full_renamed.columns.tolist()
+    # X_test_df = pd.DataFrame(X_test, columns=feature_names)
+
+    # # 4) For each feature, shuffle it n_repeats times and measure accuracy drop
+    # n_repeats = 10
+    # perm_importances = np.zeros(len(feature_names))
+    # perm_std       = np.zeros(len(feature_names))
+
+    # # Loop over feature indices
+    # for j, feat in enumerate(feature_names):
+    #     acc_drops = []
+    #     for _ in range(n_repeats):
+    #         # Make a copy of X_test_df and shuffle **only** column `feat`
+    #         X_shuffled = X_test_df.copy()
+    #         X_shuffled[feat] = np.random.permutation(X_shuffled[feat].values)
+
+    #         # Predict with the model on the shuffled data
+    #         probs_perm = best_model.predict(X_shuffled.values)
+    #         preds_perm = probs_perm.argmax(axis=1)
+    #         acc_perm   = (preds_perm == y_test_labels).mean()
+
+    #         # Accuracy drop = baseline_acc − acc_perm
+    #         acc_drops.append(baseline_acc - acc_perm)
+
+    #     # Store the mean and std of the drops
+    #     perm_importances[j] = np.mean(acc_drops)
+    #     perm_std[j] = np.std(acc_drops)
+
+    # # 5) Sort features by mean accuracy drop (descending)
+    # idx_sorted = np.argsort(perm_importances)[::-1]
+    # sorted_feats = [feature_names[i] for i in idx_sorted]
+    # sorted_means = perm_importances[idx_sorted]
+    # sorted_stds  = perm_std[idx_sorted]
+
+    # # 6) Plot a bar chart of (mean drop ± std) for each feature
+    # plt.figure(figsize=(12, 6))
+    # plt.bar(range(len(sorted_feats)), sorted_means, yerr=sorted_stds, align='center')
+    # plt.xticks(range(len(sorted_feats)), sorted_feats, rotation=90)
+    # plt.ylabel("Mean accuracy drop (± std) after shuffling")
+    # plt.title("Permutation‐Importance of Each Feature")
+    # plt.tight_layout()
+
+    # perm_path = os.path.join(f'/Users/a_fin/Desktop/Year 4/Project/Data/', 'permutation_importance.png')
+    # os.makedirs(os.path.dirname(perm_path), exist_ok=True)
+    # plt.savefig(perm_path)
+    # plt.close()
+    # print(f"Saved manual permutation‐importance plot → {perm_path}")
+
+    # # 7) Optionally, print top 5 features
+    # print("Top 5 features by permutation‐importance (manual):")
+    # for i in range(min(5, len(sorted_feats))):
+    #     print(f"  {i+1}. {sorted_feats[i]} (mean drop = {sorted_means[i]:.4f} ± {sorted_stds[i]:.4f})")
+
+    # # —————————————————————————————————————————————————————————————— 
+
+    #     # —————————————————————————————— 8.75 SHAP EXPLANATIONS (FIXED) ——————————————————————————————
+
+    # # Pick a small background set (e.g. up to 100 random training samples)
+    # np.random.seed(42)
+    # bg_indices = np.random.choice(X_train.shape[0], size=min(100, X_train.shape[0]), replace=False)
+    # X_background = X_train[bg_indices]
+
+    # # 1) Create the DeepExplainer
+    # # If you see a “DeepExplainer with TensorFlow eager mode” error, you can uncomment:
+    # #    tf.compat.v1.disable_eager_execution()
+    # explainer = shap.DeepExplainer(best_model, X_background)
+
+    # # 2) Select a modest subset of X_test to explain (up to 100 points)
+    # test_indices = np.random.choice(X_test.shape[0], size=min(100, X_test.shape[0]), replace=False)
+    # X_shap = X_test[test_indices]
+
+    # # 3) Compute SHAP values
+    # shap_values = explainer.shap_values(X_shap)
+
+    # # 4) Convert shap_values into a single “mean |SHAP| per feature” vector of length = n_features
+    # if isinstance(shap_values, list):
+    #     # shap_values is a list of length = n_classes; each entry is (n_samples, n_features)
+    #     # Compute per-class mean(|shap|)
+    #     mean_abs_per_class = [np.abs(cls_shap).mean(axis=0) for cls_shap in shap_values]
+    #     # Now average over classes → result shape = (n_features,)
+    #     shap_abs_mean = np.mean(mean_abs_per_class, axis=0)
+
+    # else:
+    #     # shap_values is a single ndarray. Possible shapes:
+    #     #  - (n_samples, n_features)        (binary or single-output)
+    #     #  - (n_classes, n_samples, n_features)   (multi-output packed into one array)
+    #     arr = np.array(shap_values)
+    #     if arr.ndim == 2:
+    #         # Only one output dimension: arr.shape = (n_samples, n_features)
+    #         shap_abs_mean = np.abs(arr).mean(axis=0)
+
+    #     elif arr.ndim == 3:
+    #         # Either (n_classes, n_samples, n_features) or (n_samples, n_features, n_classes).
+    #         # We check which axis corresponds to n_classes by comparing to label_names.
+    #         n_classes = len(label_names)
+    #         if arr.shape[0] == n_classes and arr.shape[2] != n_classes:
+    #             # arr.shape = (n_classes, n_samples, n_features)
+    #             # → take absolute, then mean over samples (axis=1), then mean over classes (axis=0)
+    #             shap_abs_mean = np.mean(np.abs(arr), axis=(0, 1))
+    #         elif arr.shape[2] == n_classes and arr.shape[0] != n_classes:
+    #             # arr.shape = (n_samples, n_features, n_classes)
+    #             # → take absolute, then mean over classes (axis=2), then mean over samples (axis=0)
+    #             temp = np.abs(arr).mean(axis=2)   # shape = (n_samples, n_features)
+    #             shap_abs_mean = temp.mean(axis=0) # shape = (n_features,)
+    #         else:
+    #             raise ValueError(f"Unexpected shap_values.shape = {arr.shape}. Cannot infer class axis.")
+    #     else:
+    #         raise ValueError(f"Unexpected shap_values.ndim = {arr.ndim}. Expected 2 or 3.")
+
+    # # 5) Now shap_abs_mean is guaranteed to have length = n_features
+    # feature_names = X_full_renamed.columns.tolist()
+    # if shap_abs_mean.shape[0] != len(feature_names):
+    #     raise ValueError(
+    #         f"SHAP‐output size mismatch: got {shap_abs_mean.shape[0]} features but expected {len(feature_names)}."
+    #     )
+
+    # # 6) Sort features by average |SHAP|
+    # idx_shap = np.argsort(shap_abs_mean)[::-1]
+    # sorted_feats_shap = [feature_names[i] for i in idx_shap]
+    # sorted_shap_vals   = shap_abs_mean[idx_shap]
+
+    # # 7) Plot a bar chart of average |SHAP| per feature
+    # plt.figure(figsize=(12, 6))
+    # plt.bar(range(len(feature_names)), sorted_shap_vals, align='center')
+    # plt.xticks(range(len(feature_names)), sorted_feats_shap, rotation=90)
+    # plt.ylabel("Mean(|SHAP value|)")
+    # plt.title("Global SHAP‐Importance (average over all classes)")
+    # plt.tight_layout()
+
+    # shap_path = os.path.join(f'/Users/a_fin/Desktop/Year 4/Project/Data/', 'shap_global_importance.png')
+    # os.makedirs(os.path.dirname(shap_path), exist_ok=True)
+    # plt.savefig(shap_path)
+    # plt.close()
+    # print(f"Saved SHAP global importance bar chart → {shap_path}")
+
+    # # ——————————————————————————————————————————————————————————————
+
+    # # 9. Cluster analysis on the full cleaned dataset
+    # scaler = StandardScaler()
+    # X_clean = clean_impute(X_full_renamed)
+    # scaler.fit(X_clean)
+    # X_scaled = pd.DataFrame(
+    #     scaler.transform(X_clean),
+    #     columns=X_clean.columns, index=X_clean.index
+    # )
+    # analyze_cluster_averages(
+    #     X_scaled,
+    #     best_model,
+    #     label_names,
+    #     le=le,
+    #     out_dir=f'/Users/a_fin/Desktop/Year 4/Project/Data/'
+    # )
+
+    # # 10. Save the final tuned model and label encoder for future inference
+    # best_model.save('neural_decoder_model.h5')
+    # joblib.dump(le, 'label_encoder.pkl')
+    # print('Saved tuned model → neural_decoder_model.h5')
+    # print('Saved label encoder → label_encoder.pkl')
 
 
 if __name__ == '__main__':
