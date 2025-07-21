@@ -159,19 +159,53 @@ if __name__ == "__main__":
     # params = fit_t_params(df[features + ['Cluster']], state_column='Cluster', dfs=6)
     #
     # Or, manually specify parameters for full control:
-    # Example for 3 states (2 stable, 1 metastable), 14 features:
-    params = {
-        0: {'mean': [0]*14, 'cov': np.eye(14), 'df': 5},           # Stable state A
-        1: {'mean': [2]*14, 'cov': np.eye(14)*1.5, 'df': 5},       # Stable state B
-        2: {'mean': [1]*14, 'cov': np.eye(14)*2.0, 'df': 5}        # Metastable transition state
-    }
     feature_names = ['MetaAwareness', 'Presence', 'PhysicalEffort','MentalEffort','Boredom','Receptivity','EmotionalIntensity','Clarity','Release','Bliss','Embodiment','Insightfulness','Anxiety','SpiritualExperience']
+    n_features = len(feature_names)
+
+    # Define feature groups for structured, anti-correlated experiences
+    # Group 1: Internal/Cognitive experiences
+    group1_features = ['MetaAwareness', 'Clarity', 'Insightfulness', 'Receptivity', 'Presence', 'Release', 'SpiritualExperience']
+    # Group 2: Somatic/Emotional experiences (anti-correlated with Group 1)
+    group2_features = ['PhysicalEffort', 'EmotionalIntensity', 'Bliss', 'Boredom', 'Anxiety', 'MentalEffort']
+    # Group 3: Features that are moderately active
+    group3_features = ['Embodiment' ]
+
+
+    # Helper to get indices of features
+    get_indices = lambda features: [feature_names.index(f) for f in features]
+    g1_idx, g2_idx, g3_idx = get_indices(group1_features), get_indices(group2_features), get_indices(group3_features)
+
+    # --- State Definitions ---
+    # State A: "Focused Internal" - High on cognitive, low on somatic
+    mean_A = np.full(n_features, 0.5) # Start with a baseline
+    mean_A[g1_idx] = [0.8, 0.85, 0.9, 0.75, 0.75, 0.8, 0.85] # High internal awareness
+    mean_A[g2_idx] = [0.2, 0.15, 0.2, 0.1, 0.15, 0.2]  # Low somatic/emotional
+    mean_A[g3_idx] = 0.4                   # Moderate presence/release
+
+
+    # State B: "Somatic Release" - Low on cognitive, high on somatic
+    mean_B = np.full(n_features, 0.5) # Start with a baseline
+    mean_B[g1_idx] = [0.2, 0.15, 0.2, 0.1, 0.15, 0.2, 0.25] # Low internal awareness
+    mean_B[g2_idx] = [0.8, 0.85, 0.9, 0.75, 0.75, 0.8]  # High somatic/emotional
+    mean_B[g3_idx] = 0.6                  # Higher presence/release
+
+
+    # State C: "Metastable/Transition" - In-between state, higher variance
+    mean_C = (mean_A + mean_B) / 2 # Average of the two primary states
+    mean_C[g3_idx] = 0.5           # Slightly higher background noise
+
+    # Define the parameters dictionary for the simulator
+    params = {
+        'A': { 'mean': mean_A, 'cov': np.eye(n_features)*0.05, 'df': 5 },
+        'B': { 'mean': mean_B, 'cov': np.eye(n_features)*0.05, 'df': 5 },
+        'C': { 'mean': mean_C, 'cov': np.eye(n_features)*0.1,  'df': 5 } # Higher covariance for transition
+    }
     
     # Markov chain with metastable transition state:
     transition_matrix = [
-        [0.90, 0.00, 0.10],  # state 0: mostly stays, can go to metastable
-        [0.00, 0.90, 0.10],  # state 1: mostly stays, can go to metastable
-        [0.15, 0.15, 0.70]   # metastable: likely to go to 0 or 1, rarely stays
+        [0.90, 0.00, 0.10],  # state A: mostly stays, can go to metastable C
+        [0.00, 0.90, 0.10],  # state B: mostly stays, can go to metastable C
+        [0.05, 0.05, 0.90]   # state C: likely to go to A or B, rarely stays
     ]
     initial_probs = [1.0, 0.0, 0.0] # Initial state probabilities
     
@@ -256,7 +290,7 @@ if __name__ == "__main__":
         feature_names=feature_names,
         transition_matrix=np.array(transition_matrix),
         initial_probs=np.array(initial_probs),
-        smoothness=1  # High smoothness for testing smooth data pipeline
+        smoothness=15  # High smoothness for testing smooth data pipeline
     )
 
     all_data_smooth = []

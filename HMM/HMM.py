@@ -19,7 +19,7 @@ import pickle
 
 
 # Load YAML file
-with open("Breathwork.yaml", "r") as file:
+with open("Simulation.yaml", "r") as file:
     config = yaml.safe_load(file)  # Converts YAML to a Python dictionary
 
 from HMM_methods import csv_splitter, principal_component_finder, CustomHMMClustering, Visualiser, HMMJumpAnalysis
@@ -47,16 +47,16 @@ df_TET_feelings_prin_dict = principal_component_finder_instance.PCA_split(split_
 # You might wish to change this if you have a different dataset.
 no_of_jumps = config['no_of_jumps']
 
-transition_contributions = 0.01
+transition_contributions = 0.1
 clustering = CustomHMMClustering(config['filelocation_TET'], config['savelocation_TET'],
                                     df_csv_file_original, feelings, principal_components, no_of_jumps, transition_contributions)
 
-results_array, dictionary_clust_labels, transitions, notransitions = clustering.run(num_base_states=2, num_iterations=50, num_repetitions=1)
-results_array.to_csv("/Users/a_fin/Desktop/Year 4/Project/Data/HMM_output_adjusted.csv", index=False)
-notransitions.to_csv("/Users/a_fin/Desktop/Year 4/Project/Data/HMM_output_adjusted_notransitions.csv", index=False)
+results_array, dictionary_clust_labels, transitions, notransitions = clustering.run(num_base_states=2, num_iterations=30, num_repetitions=1, gamma_threshold = 0.05, min_nu = 9)
+results_array.to_csv("/Users/a_fin/Desktop/Year 4/Project/Summer_Data/HMM_output_adjusted.csv", index=False)
+notransitions.to_csv("/Users/a_fin/Desktop/Year 4/Project/Summer_Data/HMM_output_adjusted_notransitions.csv", index=False)
 
 
-with open("/Users/a_fin/Desktop/Year 4/Project/Data/HMM_output_transitions.pkl", "wb") as f:
+with open("/Users/a_fin/Desktop/Year 4/Project/Summer_Data/HMM_output_transitions.pkl", "wb") as f:
     pickle.dump(transitions, f)
 
 

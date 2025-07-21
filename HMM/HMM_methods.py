@@ -165,7 +165,7 @@ class principal_component_finder:
 # Custom HMM Model using multivariate t–distribution                           |
 # =============================================================================|
 class HMMModel:
-    def __init__(self, num_base_states, num_emissions, data=None, random_seed=12345):
+    def __init__(self, num_base_states, num_emissions, min_nu, data=None, random_seed=12345):
         """
         The model will have an extra state in addition to the base states.
         num_base_states: number of "pure" states.
@@ -173,6 +173,7 @@ class HMMModel:
         """
         self.num_base_states = num_base_states
         self.num_states = num_base_states + 1  # Extra state for transitions.
+        self.min_nu = min_nu
         np.random.seed(random_seed)
         random.seed(random_seed)
 
@@ -190,7 +191,7 @@ class HMMModel:
 
             # Diagonal-dominated initialization for transition probabilities.
             base_prob = 0.7
-            extra_prob = 0.05  # Lower probability for transitional state
+            extra_prob = 0.1  # Lower probability for transitional state
             self.trans_prob = np.eye(self.num_states) * base_prob
             self.trans_prob[-1, :] = extra_prob  # Transitional state row
             self.trans_prob[:, -1] = extra_prob  # Transitional state column
@@ -233,12 +234,12 @@ class HMMModel:
         return eigenvectors @ np.diag(eigenvalues) @ eigenvectors.T
 
     @staticmethod
-    def estimate_nu(gamma_vals, data, mean, covariance, max_iter=100):
+    def estimate_nu(gamma_vals, data, mean, covariance, min_nu, max_iter=100):
         N, d = data.shape
         diff = data - mean
         inv_cov = np.linalg.pinv(covariance)
         r = np.einsum('ij,ij->i', diff @ inv_cov, diff)
-        nu = np.clip(2/(np.mean(r/(d + 2)) - 1), 2, 10)
+        nu = np.clip(2/(np.mean(r/(d + 2)) - 1), min_nu, 50)
         for _ in range(max_iter):
             w = (nu + d) / (nu + r)
             numerator = np.sum(gamma_vals * (np.log(w) - w))
@@ -248,7 +249,7 @@ class HMMModel:
             nu_new = nu - numerator / denominator
             if abs(nu_new - nu) < 1e-4:
                 break
-            nu = np.clip(nu_new, 2, 20)
+            nu = np.clip(nu_new, min_nu, 50)
         return nu
 
     @staticmethod
@@ -258,8 +259,8 @@ class HMMModel:
         and reduce transitions into/out of the extra state.
         """
         # Set a higher prior for base states and lower for the extra state.
-        base_prior = 2.0
-        extra_prior = 0.1
+        base_prior = 1.1 # Reduced from 2.0 to make transitions more likely
+        extra_prior = 1.0 # Increased from 0.1 to be less punitive
         prior = np.full((num_states, num_states), base_prior)
         # For transitions involving the extra (last) state, use the extra_prior.
         prior[-1, :] = extra_prior
@@ -270,7 +271,7 @@ class HMMModel:
         return trans_prob
 
     @staticmethod
-    def update_emission_parameters(data, gamma, num_states, make_positive_definite, estimate_nu):
+    def update_emission_parameters(data, gamma, num_states, make_positive_definite, estimate_nu, min_nu):
         num_data, num_emissions = data.shape
         means = np.zeros((num_states, num_emissions))
         covariances = np.zeros((num_states, num_emissions, num_emissions))
@@ -286,7 +287,7 @@ class HMMModel:
             covariances[j, :, :] += np.eye(num_emissions) * 1e-4
             if j > 0:  # Optionally push means apart (currently no shift applied)
                 means[j, :] += 0 * (means[j, :] - np.mean(means[:j, :], axis=0))
-            nu[j] = estimate_nu(gamma_j, data, means[j, :], covariances[j, :, :])
+            nu[j] = estimate_nu(gamma_j, data, means[j, :], covariances[j, :, :], min_nu)
         return means, covariances, nu
 
     def _compute_emission_probs(self, data):
@@ -398,7 +399,8 @@ class HMMModel:
             self.emission_means, self.emission_covs, self.nu = self.update_emission_parameters(
                 data, gamma_vals, self.num_states,
                 make_positive_definite=self.make_positive_definite,
-                estimate_nu=self.estimate_nu
+                estimate_nu=self.estimate_nu,
+                min_nu = self.min_nu
             )
         return self.trans_prob, self.emission_means, self.emission_covs, self.nu
 
@@ -456,7 +458,7 @@ class CustomHMMClustering:
             new_labels = np.argmin(distances, axis=1)
             self.array.loc[mask, 'labels'] = new_labels
 
-    def perform_clustering(self, num_base_states, num_iterations, num_repetitions, base_seed=12345):
+    def perform_clustering(self, num_base_states, num_iterations, num_repetitions, min_nu, base_seed=12345):
         num_emissions = len(self.feelings)
         data = self.array[self.feelings].values
         
@@ -480,8 +482,8 @@ class CustomHMMClustering:
             seed = base_seed + rep
             np.random.seed(seed)
             random.seed(seed)
-            
-            model = HMMModel(num_base_states, num_emissions=num_emissions, data=data_normalized, random_seed=seed)
+
+            model = HMMModel(num_base_states, num_emissions=num_emissions, min_nu= min_nu, data=data_normalized, random_seed=seed)
             model.train(data_normalized, num_iterations=num_iterations, transition_contributions = self.transition_contributions)
             
             state_seq, log_prob = model.decode(data_normalized)
@@ -603,17 +605,19 @@ class CustomHMMClustering:
         with open(self.savelocation_TET + 'cluster_summary.txt', 'w') as f:
             f.write("\n".join(summary))
 
-    def post_process_cluster_three(self, cluster_three_label=2, gamma_threshold=0.55):
+    def post_process_cluster_three(self, cluster_three_label=2, gamma_threshold=0.3):
         """
-        Reassign points in cluster 3 (the transition cluster) that have weak membership.
-        If the gamma value for cluster 3 is below the gamma_threshold, reassign these points 
-        to the base cluster with the highest gamma among the base clusters.
+        Widens the definition of the transitional state (cluster_three_label).
+        It reassigns points from base states to the transitional state if their
+        gamma value for the transitional state is above the specified threshold.
         """
-        mask = (self.array['labels'] == cluster_three_label) & (self.array[f'gamma_{cluster_three_label}'] < gamma_threshold)
-        for idx in self.array[mask].index:
-            base_gammas = [self.array.at[idx, f'gamma_{i}'] for i in range(cluster_three_label)]
-            new_label = np.argmax(base_gammas)
-            self.array.at[idx, 'labels'] = new_label
+        # Identify points NOT in the transitional cluster but with a high gamma for it.
+        mask = (self.array['labels'] != cluster_three_label) & \
+               (self.array[f'gamma_{cluster_three_label}'] >= gamma_threshold)
+        
+        # Reassign these points to the transitional cluster.
+        self.array.loc[mask, 'labels'] = cluster_three_label
+        
         self.calculate_dictionary_clust_labels()
 
     def analyze_transitions(self, num_base_states, abrupt_gamma_threshold=0.6):
@@ -789,15 +793,15 @@ class CustomHMMClustering:
         with open(os.path.join(self.savelocation_TET, 'middle_state_validation.txt'), 'w') as f:
             f.write(msg)
 
-    def run(self, num_base_states, num_iterations, num_repetitions, base_seed = 12345):
+    def run(self, num_base_states, num_iterations, num_repetitions, gamma_threshold, min_nu, base_seed = 12345, ):
         self.preprocess_data()
-        self.perform_clustering(num_base_states, num_iterations, num_repetitions, base_seed =12345)
+        self.perform_clustering(num_base_states, num_iterations, num_repetitions, min_nu,  base_seed =12345)
         self.calculate_dictionary_clust_labels()
         self.plot_results()
         self._plot_cluster_features()
         self._create_cluster_summary()
         # The transitional state is the last one, index `num_base_states`
-        self.post_process_cluster_three(cluster_three_label=num_base_states, gamma_threshold=0.85)
+        self.post_process_cluster_three(cluster_three_label=num_base_states, gamma_threshold= gamma_threshold)
         self.analyze_transitions(num_base_states)
         # --- Added best-practice visualizations ---
         self.plot_state_sequence()

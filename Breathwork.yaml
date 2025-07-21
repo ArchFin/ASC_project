@@ -1,5 +1,5 @@
 
-filelocation_TET: '/Users/a_fin/Desktop/Year 4/Project/Data/NDT_all_12thDec_uncleaned.csv'  # File location of the Temporal Experience Traces (TET) for Breathwork, needs to be in CSV format.
+filelocation_TET: '/Users/a_fin/Desktop/Year 4/Project/Data/synthetic_ndt.csv'  # File location of the Temporal Experience Traces (TET) for Breathwork, needs to be in CSV format.
 
 savelocation_TET: '/Users/a_fin/Desktop/Year 4/Project/Data/'
 

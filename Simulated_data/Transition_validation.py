@@ -9,7 +9,7 @@ from scipy.optimize import linear_sum_assignment
 df = pd.read_csv('/Users/a_fin/Desktop/Year 4/Project/Summer_Data/HMM_output_adjusted_notransitions.csv')  # Update this path as needed
 
 # Increment 'Cluster' by 1, leave 'transition_label' as is
-df['Cluster_plus1'] = df['Cluster'] + 1
+df['Cluster_plus1'] = df['transition_label']
 
 # Custom mapping for 'Cluster' column
 cluster_map = {1: 2, 2: 3, 0: 1}
@@ -20,7 +20,8 @@ if 'labels' not in df.columns:
     raise KeyError("Column 'labels' not found in the DataFrame. Available columns: " + str(df.columns.tolist()))
 
 # Align predicted and simulated clusters using Hungarian algorithm
-sim_labels = df['Cluster'].values
+# Convert string-based simulated labels ('A', 'B', 'C') to integer labels (0, 1, 2)
+sim_labels, _ = pd.factorize(df['Cluster'])
 pred_labels = df['labels'].astype(int).values
 
 # Build confusion matrix for alignment
@@ -60,7 +61,7 @@ plt.ylabel('Simulated')
 plt.title(f'Normalized Confusion Matrix\nAccuracy={acc:.3f}, NMI={nmi:.3f}')
 plt.tight_layout()
 plt.savefig('/Users/a_fin/Desktop/Year 4/Project/Summer_Data/Cluster_vs_Transition_Heatmap_normalized.png')
-plt.show()
+plt.close()
 
 print(f'Optimal state mapping (predicted → simulated): {mapping}')
 print(f'Accuracy: {acc:.4f}')

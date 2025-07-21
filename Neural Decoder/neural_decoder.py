@@ -31,6 +31,8 @@ import pandas as pd
 from sklearn.model_selection import train_test_split, GroupKFold
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.metrics import roc_auc_score, confusion_matrix
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.utils.class_weight import compute_class_weight
 
 # Keras (via TensorFlow) layers and utilities for building an MLPC
 from keras._tf_keras.keras.models import Sequential
@@ -78,22 +80,28 @@ def select_features(X, pattern_keep=None):
     return X[cols]
 
 
-def clean_impute(X, threshold=2.5):
+def clean_impute(X, mu=None, sigma=None, threshold=2.5):
     """
     1. Remove rows where all features are NaN.
     2. Clip outliers beyond `threshold * std` for each column, setting them to NaN.
+       If mu and sigma are provided, they are used for clipping. Otherwise, they are computed from X.
     3. Forward-fill then backward-fill to impute missing values.
     4. Drop any remaining NaNs.
     This ensures no extreme outliers remain and that each row has no missing entries.
     """
     mask_allnan = X.isna().all(axis=1)
     X = X[~mask_allnan]
-    mu = X.mean()
-    sigma = X.std()
+    
+    # If mu and sigma are not provided, compute them from the data (for training set)
+    if mu is None:
+        mu = X.mean()
+    if sigma is None:
+        sigma = X.std()
+
     # Any value with |value - mean| > threshold * sigma becomes NaN
     X = X.where(np.abs(X - mu) <= threshold * sigma)
     X = X.fillna(method='ffill').fillna(method='bfill').dropna()
-    return X
+    return X, mu, sigma
 
 
 def preprocess(X_train, X_test, y_train, y_test, random_state=42):
@@ -106,12 +114,12 @@ def preprocess(X_train, X_test, y_train, y_test, random_state=42):
     6. Convert y to one-hot vectors.
     Returns: X_train_scaled, X_test_scaled, Y_train_onehot, Y_test_onehot, label_encoder, classes.
     """
-    # Clean and impute training data
-    X_train_clean = clean_impute(X_train)
+    # Clean and impute training data, and get the statistics (mu, sigma)
+    X_train_clean, mu, sigma = clean_impute(X_train)
     y_train_clean = y_train.loc[X_train_clean.index]
 
-    # Clean and impute test data
-    X_test_clean = clean_impute(X_test)
+    # Clean and impute test data using statistics from the training data
+    X_test_clean, _, _ = clean_impute(X_test, mu=mu, sigma=sigma)
     if X_test_clean.empty:
         print("Warning: Test set became empty after cleaning. Skipping this fold.")
         # Return empty arrays and a flag to signal skipping
@@ -530,9 +538,15 @@ def evaluate_and_save(model, X_test, Y_test, label_names, out_dir='results'):
     os.makedirs(out_dir, exist_ok=True)
 
     # 1) Predictions
-    probs = model.predict(X_test)       # Softmax probabilities
-    preds = probs.argmax(axis=1)        # Predicted class indices
-    true = Y_test.argmax(axis=1)        # True class indices
+    if hasattr(model, 'predict_proba'): # Scikit-learn style model
+        probs = model.predict_proba(X_test)
+        preds = model.predict(X_test)
+        # Scikit-learn models work with integer labels, not one-hot
+        true = Y_test 
+    else: # Keras style model
+        probs = model.predict(X_test)       # Softmax probabilities
+        preds = probs.argmax(axis=1)        # Predicted class indices
+        true = Y_test.argmax(axis=1) 
 
     # 2) Confusion matrix (counts + percentage)
     labels = range(len(label_names))
