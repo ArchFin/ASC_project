@@ -51,7 +51,7 @@ transition_contributions = 0.1
 clustering = CustomHMMClustering(config['filelocation_TET'], config['savelocation_TET'],
                                     df_csv_file_original, feelings, principal_components, no_of_jumps, transition_contributions)
 
-results_array, dictionary_clust_labels, transitions, notransitions = clustering.run(num_base_states=2, num_iterations=30, num_repetitions=1, gamma_threshold = 0.05, min_nu = 9)
+results_array, dictionary_clust_labels, transitions, notransitions = clustering.run(num_base_states=config['no_clust'], num_iterations=30, num_repetitions=1, gamma_threshold = 0.05, min_nu = 2)
 results_array.to_csv("/Users/a_fin/Desktop/Year 4/Project/Summer_Data/HMM_output_adjusted.csv", index=False)
 notransitions.to_csv("/Users/a_fin/Desktop/Year 4/Project/Summer_Data/HMM_output_adjusted_notransitions.csv", index=False)
 

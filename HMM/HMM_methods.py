@@ -546,20 +546,41 @@ class CustomHMMClustering:
         num_clusters = np.max(self.labels_fin) + 1
         cmap = plt.get_cmap('tab10')
         colours = [cmap(i) for i in range(num_clusters)]
-        fixed_colours = ['green', 'red', 'blue']
+        
+        # --- 2D Scatter Plot ---
         plt.figure(figsize=(8, 6))
         plt.scatter(
             self.array["principal component 1"],
             self.array["principal component 2"],
-            c=[fixed_colours[label] for label in self.labels_fin],
+            c=[colours[label] for label in self.labels_fin],
             s=1
         )
         plt.xlabel("Principal Component 1")
         plt.ylabel("Principal Component 2")
-        plt.title("Transition–State HMM Assignments")
+        plt.title("Transition–State HMM Assignments (2D)")
         plt.tight_layout()
-        plt.savefig(self.savelocation_TET + 'HMM_state_scatter_plot.png')
+        plt.savefig(os.path.join(self.savelocation_TET, 'HMM_state_scatter_plot_2D.png'))
         plt.close()
+
+        # --- 3D Scatter Plot (if 3+ components exist) ---
+        if self.principal_components.shape[0] >= 3:
+            self.array["principal component 3"] = projected.iloc[:, 2]
+            fig = plt.figure(figsize=(10, 8))
+            ax = fig.add_subplot(111, projection='3d')
+            ax.scatter(
+                self.array["principal component 1"],
+                self.array["principal component 2"],
+                self.array["principal component 3"],
+                c=[colours[label] for label in self.labels_fin],
+                s=1
+            )
+            ax.set_xlabel("Principal Component 1")
+            ax.set_ylabel("Principal Component 2")
+            ax.set_zlabel("Principal Component 3")
+            ax.set_title("Transition–State HMM Assignments (3D)")
+            plt.tight_layout()
+            plt.savefig(os.path.join(self.savelocation_TET, 'HMM_state_scatter_plot_3D.png'))
+            plt.close()
 
         centres_normalized = (self.cluster_centres_fin - self.mean) / self.std
         centres_projected = centres_normalized.dot(self.principal_components.T)
@@ -605,7 +626,7 @@ class CustomHMMClustering:
         with open(self.savelocation_TET + 'cluster_summary.txt', 'w') as f:
             f.write("\n".join(summary))
 
-    def post_process_cluster_three(self, cluster_three_label=2, gamma_threshold=0.3):
+    def post_process_cluster_three(self, cluster_three_label, gamma_threshold=0.3):
         """
         Widens the definition of the transitional state (cluster_three_label).
         It reassigns points from base states to the transitional state if their
@@ -793,15 +814,33 @@ class CustomHMMClustering:
         with open(os.path.join(self.savelocation_TET, 'middle_state_validation.txt'), 'w') as f:
             f.write(msg)
 
+        def calculate_and_report_smoothness(self):
+            """
+            Calculates the smoothness of the input data and saves it to a file.
+            Smoothness is defined as the mean absolute difference of consecutive timepoints.
+            A lower value indicates smoother data.
+            """
+            data_values = self.array[self.feelings].values
+            # Calculate difference along time axis (axis=0)
+            smoothness_metric = np.mean(np.abs(np.diff(data_values, axis=0)))
+            
+            msg = f"Data smoothness metric (mean absolute consecutive difference): {smoothness_metric:.6f}\n"
+            print(msg)
+            
+            # Save to file for traceability
+            with open(os.path.join(self.savelocation_TET, 'data_smoothness_metric.txt'), 'w') as f:
+                f.write(msg)
+
     def run(self, num_base_states, num_iterations, num_repetitions, gamma_threshold, min_nu, base_seed = 12345, ):
         self.preprocess_data()
+        # self.calculate_and_report_smoothness()
         self.perform_clustering(num_base_states, num_iterations, num_repetitions, min_nu,  base_seed =12345)
         self.calculate_dictionary_clust_labels()
         self.plot_results()
         self._plot_cluster_features()
         self._create_cluster_summary()
         # The transitional state is the last one, index `num_base_states`
-        self.post_process_cluster_three(cluster_three_label=num_base_states, gamma_threshold= gamma_threshold)
+        self.post_process_cluster_three(cluster_three_label=num_base_states, gamma_threshold=gamma_threshold)
         self.analyze_transitions(num_base_states)
         # --- Added best-practice visualizations ---
         self.plot_state_sequence()
@@ -992,8 +1031,12 @@ class Visualiser:
         """Save transition metadata to CSV file with per-transition condition frequencies"""
         transitions_list = []
         time_step = 28 * self.no_of_jumps  # Seconds between data points
-        window_size = 2
-        possible_conditions = self.df_csv_file_original['Condition'].unique()
+        
+        has_condition_col = 'Condition' in self.df_csv_file_original.columns
+        
+        if has_condition_col:
+            window_size = 2
+            possible_conditions = self.df_csv_file_original['Condition'].unique()
 
         for group_key, transitions in self.group_transitions.items():
             if self.has_week:
@@ -1003,7 +1046,7 @@ class Visualiser:
                 week = None
 
             original_group = self.traj_transitions_dict_original.get(group_key, pd.DataFrame())
-            if original_group.empty or 'Condition' not in original_group.columns:
+            if original_group.empty:
                 continue
 
             for transition in transitions:
@@ -1012,31 +1055,6 @@ class Visualiser:
                 end_time = (end_idx + 1) * time_step
                 duration = end_time - start_time
 
-                # Convert to original data indices
-                original_start_idx = max(0, int(start_time // 28))
-                original_end_idx = min(len(original_group)-1, int(end_time // 28))
-
-                # Extract conditions in each region
-                before_start = max(0, original_start_idx - window_size)
-                before_end = original_start_idx - 1
-                before_conditions = original_group.iloc[before_start:before_end+1]['Condition'] if before_end >= before_start else pd.Series()
-
-                during_conditions = original_group.iloc[original_start_idx:original_end_idx+1]['Condition']
-
-                after_start = original_end_idx + 1
-                after_end = min(len(original_group)-1, original_end_idx + window_size)
-                after_conditions = original_group.iloc[after_start:after_end+1]['Condition'] if after_end >= after_start else pd.Series()
-
-                # Calculate frequencies for each condition in each period
-                def get_freq(conditions):
-                    counts = conditions.value_counts(normalize=True).to_dict()
-                    return {cond: counts.get(cond, 0.0) for cond in possible_conditions}
-
-                before_freq = get_freq(before_conditions)
-                during_freq = get_freq(during_conditions)
-                after_freq = get_freq(after_conditions)
-
-                # Build transition entry with condition frequencies
                 transition_entry = {
                     'Subject': subject,
                     'Week': week,
@@ -1049,11 +1067,36 @@ class Visualiser:
                     'Transition Type': trans_type,
                 }
 
-                # Add condition frequency columns
-                for cond in possible_conditions:
-                    transition_entry[f'Before {cond} Freq'] = before_freq.get(cond, 0.0)
-                    transition_entry[f'During {cond} Freq'] = during_freq.get(cond, 0.0)
-                    transition_entry[f'After {cond} Freq'] = after_freq.get(cond, 0.0)
+                if has_condition_col:
+                    # Convert to original data indices
+                    original_start_idx = max(0, int(start_time // 28))
+                    original_end_idx = min(len(original_group)-1, int(end_time // 28))
+
+                    # Extract conditions in each region
+                    before_start = max(0, original_start_idx - window_size)
+                    before_end = original_start_idx - 1
+                    before_conditions = original_group.iloc[before_start:before_end+1]['Condition'] if before_end >= before_start else pd.Series()
+
+                    during_conditions = original_group.iloc[original_start_idx:original_end_idx+1]['Condition']
+
+                    after_start = original_end_idx + 1
+                    after_end = min(len(original_group)-1, original_end_idx + window_size)
+                    after_conditions = original_group.iloc[after_start:after_end+1]['Condition'] if after_end >= after_start else pd.Series()
+
+                    # Calculate frequencies for each condition in each period
+                    def get_freq(conditions):
+                        counts = conditions.value_counts(normalize=True).to_dict()
+                        return {cond: counts.get(cond, 0.0) for cond in possible_conditions}
+
+                    before_freq = get_freq(before_conditions)
+                    during_freq = get_freq(during_conditions)
+                    after_freq = get_freq(after_conditions)
+                    
+                    # Add condition frequency columns
+                    for cond in possible_conditions:
+                        transition_entry[f'Before {cond} Freq'] = before_freq.get(cond, 0.0)
+                        transition_entry[f'During {cond} Freq'] = during_freq.get(cond, 0.0)
+                        transition_entry[f'After {cond} Freq'] = after_freq.get(cond, 0.0)
 
                 transitions_list.append(transition_entry)
 

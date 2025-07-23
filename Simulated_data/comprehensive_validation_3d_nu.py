@@ -29,7 +29,7 @@ sys.path.insert(0, project_root)
 from HMM.HMM_methods import CustomHMMClustering, principal_component_finder, csv_splitter
 from Simulated_data.TET_simulation import TETSimulator
 
-def generate_simulated_data(smoothness_value, save_path):
+def generate_simulated_data(smoothness_value, save_path, n_primary_states=4):
     """
     Generate simulated TET data with specified smoothness and save to CSV.
     """
@@ -48,33 +48,67 @@ def generate_simulated_data(smoothness_value, save_path):
     get_indices = lambda features: [feature_names.index(f) for f in features]
     g1_idx, g2_idx, g3_idx = get_indices(group1_features), get_indices(group2_features), get_indices(group3_features)
 
-    # State definitions
+    # --- State Definitions ---
+    all_primary_states = {}
+    
+    # State A: "Focused Internal"
     mean_A = np.full(n_features, 0.5)
     mean_A[g1_idx] = [0.8, 0.85, 0.9, 0.75, 0.75, 0.8, 0.85]
     mean_A[g2_idx] = [0.2, 0.15, 0.2, 0.1, 0.15, 0.2]
     mean_A[g3_idx] = 0.4
-
+    all_primary_states['A'] = {'mean': mean_A, 'cov': np.eye(n_features)*0.05, 'df': 5}
+    
+    # State B: "Somatic Release"
     mean_B = np.full(n_features, 0.5)
     mean_B[g1_idx] = [0.2, 0.15, 0.2, 0.1, 0.15, 0.2, 0.25]
     mean_B[g2_idx] = [0.8, 0.85, 0.9, 0.75, 0.75, 0.8]
     mean_B[g3_idx] = 0.6
-
-    mean_C = (mean_A + mean_B) / 2
-    mean_C[g3_idx] = 0.5
-
-    params = {
-        'A': {'mean': mean_A, 'cov': np.eye(n_features)*0.05, 'df': 5},
-        'B': {'mean': mean_B, 'cov': np.eye(n_features)*0.05, 'df': 5},
-        'C': {'mean': mean_C, 'cov': np.eye(n_features)*0.1, 'df': 5}
-    }
+    all_primary_states['B'] = {'mean': mean_B, 'cov': np.eye(n_features)*0.05, 'df': 5}
     
-    # Transition matrix with longer-lasting C state
-    transition_matrix = [
-        [0.90, 0.00, 0.10],  # state A: mostly stays, can go to C
-        [0.00, 0.90, 0.10],  # state B: mostly stays, can go to C  
-        [0.05, 0.05, 0.90]   # state C: mostly stays (longer duration)
-    ]
-    initial_probs = [1.0, 0.0, 0.0]
+    if n_primary_states >= 3:
+        # State D: "Neutral/Mindful"
+        mean_D = np.full(n_features, 0.5)
+        mean_D[g1_idx] = 0.5
+        mean_D[g2_idx] = 0.3
+        mean_D[g3_idx] = 0.5
+        all_primary_states['D'] = {'mean': mean_D, 'cov': np.eye(n_features)*0.03, 'df': 5}
+
+    if n_primary_states >= 4:
+        # State E: "High Arousal/Overwhelmed" - High on both, high variance
+        mean_E = np.full(n_features, 0.5)
+        mean_E[g1_idx] = 0.8
+        mean_E[g2_idx] = 0.8
+        mean_E[g3_idx] = 0.7
+        all_primary_states['E'] = {'mean': mean_E, 'cov': np.eye(n_features)*0.12, 'df': 5}
+
+    primary_state_labels = list(all_primary_states.keys())[:n_primary_states]
+    primary_states = {label: all_primary_states[label] for label in primary_state_labels}
+
+    # State C: "Metastable/Transition" - Average of all primary states
+    mean_C = np.mean([p['mean'] for p in primary_states.values()], axis=0)
+    
+    params = primary_states.copy()
+    params['C'] = { 'mean': mean_C, 'cov': np.eye(n_features)*0.1,  'df': 5 }
+    
+    final_state_labels = primary_state_labels + ['C']
+    n_states = len(final_state_labels)
+    transition_matrix = np.zeros((n_states, n_states))
+    
+    p_stay = 0.90
+    p_to_C = 1 - p_stay
+    c_idx = final_state_labels.index('C')
+    for i in range(len(primary_states)):
+        transition_matrix[i, i] = p_stay
+        transition_matrix[i, c_idx] = p_to_C
+
+    p_C_stay = 0.90
+    p_C_to_primary = (1 - p_C_stay) / len(primary_states)
+    transition_matrix[c_idx, c_idx] = p_C_stay
+    for i in range(len(primary_states)):
+        transition_matrix[c_idx, i] = p_C_to_primary
+    
+    initial_probs = np.zeros(n_states)
+    initial_probs[0] = 1.0
 
     # Generate data structure
     n_subjects = 10  # Reduced for faster computation
@@ -140,7 +174,7 @@ def generate_simulated_data(smoothness_value, save_path):
     print(f"Saved simulated data to: {save_path}")
     return save_path
 
-def run_validation_for_nu_and_smoothness(min_nu_value, data_file_path, config):
+def run_validation_for_nu_and_smoothness(min_nu_value, data_file_path, config, n_primary_states=4):
     """
     Run HMM clustering and validation for a specific min_nu value on pre-generated data.
     """
@@ -169,7 +203,7 @@ def run_validation_for_nu_and_smoothness(min_nu_value, data_file_path, config):
     )
     
     _, _, _, notransitions_df = clustering.run(
-        num_base_states=2, num_iterations=30, num_repetitions=1,
+        num_base_states=n_primary_states + 1, num_iterations=30, num_repetitions=1,
         gamma_threshold=0.03, min_nu=min_nu_value  # Using fixed gamma, variable nu
     )
     print(f"      HMM clustering complete. Output shape: {notransitions_df.shape}")
@@ -226,8 +260,9 @@ def main():
         config = yaml.safe_load(file)
     
     # Define parameter ranges
-    smoothness_values = [0, 1, 2, 3, 4, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60]
-    min_nu_values = np.arange(2, 41) # Use integers from 2 to 40
+    smoothness_values = [0, 1, 2, 3, 4, 5, 10, 15, 20, 30, 40, 50]
+    min_nu_values = np.arange(2, 31) # Use integers from 2 to 30
+    n_primary_states_to_test = 4 # 4 primary states + 1 transition state = 5 total states
 
     print(f"Testing {len(smoothness_values)} smoothness values: {smoothness_values}")
     print(f"Testing {len(min_nu_values)} min_nu values: {np.round(min_nu_values, 2).tolist()}")
@@ -251,7 +286,7 @@ def main():
         
         # Generate data for this smoothness level
         data_file_path = os.path.join(temp_data_dir, f'sim_data_smooth_{smoothness}.csv')
-        generate_simulated_data(smoothness, data_file_path)
+        generate_simulated_data(smoothness, data_file_path, n_primary_states=n_primary_states_to_test)
         
         # Test all min_nu values for this smoothness
         for j, min_nu in enumerate(min_nu_values):
@@ -259,7 +294,7 @@ def main():
             
             try:
                 acc, nmi, per_state_acc = run_validation_for_nu_and_smoothness(
-                    min_nu, data_file_path, config
+                    min_nu, data_file_path, config, n_primary_states=n_primary_states_to_test
                 )
                 
                 # Store results
@@ -412,7 +447,7 @@ def main():
     fig.suptitle('Comprehensive Validation: Min Nu vs. Data Smoothness', fontsize=18, weight='bold')
     
     # Save results
-    save_path = os.path.join(config['savelocation_TET'], 'comprehensive_3d_validation_nu_smoothness.png')
+    save_path = os.path.join(config['savelocation_TET'], f'comprehensive_3d_validation_nu_smoothness_{n_primary_states_to_test}states.png')
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
     plt.close()
     
@@ -420,7 +455,7 @@ def main():
     
     # Save results data
     results_df = pd.DataFrame(results)
-    results_csv_path = os.path.join(config['savelocation_TET'], 'comprehensive_3d_validation_nu_smoothness_data.csv')
+    results_csv_path = os.path.join(config['savelocation_TET'], f'comprehensive_3d_validation_nu_smoothness_data_{n_primary_states_to_test}states.csv')
     results_df.to_csv(results_csv_path, index=False)
     print(f"Results data saved to: {results_csv_path}")
     

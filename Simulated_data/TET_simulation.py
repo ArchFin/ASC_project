@@ -153,6 +153,13 @@ class TETSimulator:
 # 5. Example Usage & Step-by-Step Guide
 # -------------------------
 if __name__ == "__main__":
+    # --- User Configuration ---
+    # Set the number of primary states for the simulation.
+    # 2: "Focused Internal" vs "Somatic Release" (original behavior)
+    # 3: Adds a "Neutral/Mindful" state, forming a triangle with a central transition state.
+    # 4: Adds a "High Arousal" state, forming a diamond with a central transition state.
+    n_primary_states = 4 # Options: 2, 3, or 4
+
     # STEP 1: (Optional) Load real TET data to fit archetypal state parameters
     # df = pd.read_csv('your_real_data.csv')
     # features = [ ... your feature names ... ]
@@ -176,51 +183,87 @@ if __name__ == "__main__":
     g1_idx, g2_idx, g3_idx = get_indices(group1_features), get_indices(group2_features), get_indices(group3_features)
 
     # --- State Definitions ---
-    # State A: "Focused Internal" - High on cognitive, low on somatic
-    mean_A = np.full(n_features, 0.5) # Start with a baseline
-    mean_A[g1_idx] = [0.8, 0.85, 0.9, 0.75, 0.75, 0.8, 0.85] # High internal awareness
-    mean_A[g2_idx] = [0.2, 0.15, 0.2, 0.1, 0.15, 0.2]  # Low somatic/emotional
-    mean_A[g3_idx] = 0.4                   # Moderate presence/release
-
-
-    # State B: "Somatic Release" - Low on cognitive, high on somatic
-    mean_B = np.full(n_features, 0.5) # Start with a baseline
-    mean_B[g1_idx] = [0.2, 0.15, 0.2, 0.1, 0.15, 0.2, 0.25] # Low internal awareness
-    mean_B[g2_idx] = [0.8, 0.85, 0.9, 0.75, 0.75, 0.8]  # High somatic/emotional
-    mean_B[g3_idx] = 0.6                  # Higher presence/release
-
-
-    # State C: "Metastable/Transition" - In-between state, higher variance
-    mean_C = (mean_A + mean_B) / 2 # Average of the two primary states
-    mean_C[g3_idx] = 0.5           # Slightly higher background noise
-
-    # Define the parameters dictionary for the simulator
-    params = {
-        'A': { 'mean': mean_A, 'cov': np.eye(n_features)*0.05, 'df': 5 },
-        'B': { 'mean': mean_B, 'cov': np.eye(n_features)*0.05, 'df': 5 },
-        'C': { 'mean': mean_C, 'cov': np.eye(n_features)*0.1,  'df': 5 } # Higher covariance for transition
-    }
+    # Define primary states based on n_primary_states
+    all_primary_states = {}
     
-    # Markov chain with metastable transition state:
-    transition_matrix = [
-        [0.90, 0.00, 0.10],  # state A: mostly stays, can go to metastable C
-        [0.00, 0.90, 0.10],  # state B: mostly stays, can go to metastable C
-        [0.05, 0.05, 0.90]   # state C: likely to go to A or B, rarely stays
-    ]
-    initial_probs = [1.0, 0.0, 0.0] # Initial state probabilities
+    # State A: "Focused Internal" - High on cognitive, low on somatic
+    mean_A = np.full(n_features, 0.5)
+    mean_A[g1_idx] = [0.8, 0.85, 0.9, 0.75, 0.75, 0.8, 0.85]
+    mean_A[g2_idx] = [0.2, 0.15, 0.2, 0.1, 0.15, 0.2]
+    mean_A[g3_idx] = 0.4
+    all_primary_states['A'] = {'mean': mean_A, 'cov': np.eye(n_features)*0.05, 'df': 5}
+    
+    # State B: "Somatic Release" - Low on cognitive, high on somatic
+    mean_B = np.full(n_features, 0.5)
+    mean_B[g1_idx] = [0.2, 0.15, 0.2, 0.1, 0.15, 0.2, 0.25]
+    mean_B[g2_idx] = [0.8, 0.85, 0.9, 0.75, 0.75, 0.8]
+    mean_B[g3_idx] = 0.6
+    all_primary_states['B'] = {'mean': mean_B, 'cov': np.eye(n_features)*0.05, 'df': 5}
+    
+    if n_primary_states >= 3:
+        # State D: "Neutral/Mindful" - Moderate on both, low variance
+        mean_D = np.full(n_features, 0.5)
+        mean_D[g1_idx] = 0.5
+        mean_D[g2_idx] = 0.3
+        mean_D[g3_idx] = 0.5
+        all_primary_states['D'] = {'mean': mean_D, 'cov': np.eye(n_features)*0.03, 'df': 5}
+        
+    if n_primary_states >= 4:
+        # State E: "High Arousal/Overwhelmed" - High on both, high variance
+        mean_E = np.full(n_features, 0.5)
+        mean_E[g1_idx] = 0.8
+        mean_E[g2_idx] = 0.8
+        mean_E[g3_idx] = 0.7
+        all_primary_states['E'] = {'mean': mean_E, 'cov': np.eye(n_features)*0.12, 'df': 5}
+        
+    # Filter to only include the number of primary states selected
+    primary_state_labels = list(all_primary_states.keys())[:n_primary_states]
+    primary_states = {label: all_primary_states[label] for label in primary_state_labels}
+
+    # State C: "Metastable/Transition" - Average of all primary states
+    mean_C = np.mean([p['mean'] for p in primary_states.values()], axis=0)
+    
+    # Define the parameters dictionary for the simulator
+    params = primary_states.copy()
+    params['C'] = { 'mean': mean_C, 'cov': np.eye(n_features)*0.1,  'df': 5 }
+    
+    # Create the final list of state labels for the transition matrix
+    final_state_labels = primary_state_labels + ['C']
+
+    # Dynamically create Markov chain with metastable transition state
+    n_states = len(final_state_labels)
+    transition_matrix = np.zeros((n_states, n_states))
+    
+    # Primary states mostly stay, but can transition to the central state 'C'
+    p_stay = 0.90
+    p_to_C = 1 - p_stay
+    c_idx = final_state_labels.index('C')
+    for i in range(len(primary_states)):
+        transition_matrix[i, i] = p_stay
+        transition_matrix[i, c_idx] = p_to_C # Transition to C
+
+    # Central state 'C' can transition to any primary state, and can also stay
+    p_C_stay = 0.90
+    p_C_to_primary = (1 - p_C_stay) / len(primary_states)
+    transition_matrix[c_idx, c_idx] = p_C_stay
+    for i in range(len(primary_states)):
+        transition_matrix[c_idx, i] = p_C_to_primary
+    
+    initial_probs = np.zeros(n_states)
+    initial_probs[0] = 1.0 # Start in the first primary state ('A')
     
     # Print and save the original transition matrix as a labeled confusion matrix
     import matplotlib.pyplot as plt
     import seaborn as sns
     plt.figure(figsize=(6, 5))
     ax = sns.heatmap(np.array(transition_matrix), annot=True, fmt='.2f', cmap='Blues',
-                     xticklabels=[f'State {i}' for i in range(len(transition_matrix))],
-                     yticklabels=[f'State {i}' for i in range(len(transition_matrix))])
-    plt.title('Original Transition Matrix (Confusion Matrix)')
+                     xticklabels=final_state_labels,
+                     yticklabels=final_state_labels)
+    plt.title(f'Transition Matrix ({n_primary_states} Primary States)')
     plt.xlabel('To State')
     plt.ylabel('From State')
     plt.tight_layout()
-    plt.savefig('/Users/a_fin/Desktop/Year 4/Project/Summer_Data/original_transition_matrix_confusion.png')
+    plt.savefig(f'/Users/a_fin/Desktop/Year 4/Project/Summer_Data/transition_matrix_{n_primary_states}_states.png')
     plt.close()
     
     # STEP 3: Save simulated data in a real-data-like format
@@ -248,7 +291,7 @@ if __name__ == "__main__":
         feature_names=feature_names,
         transition_matrix=np.array(transition_matrix),
         initial_probs=np.array(initial_probs),
-        smoothness=10
+        smoothness=1
     )
     for subj in subjects:
         for week in weeks:
@@ -303,7 +346,9 @@ if __name__ == "__main__":
     for subj in subjects:
         for week in weeks:
             for sess in sessions:
-                sim_data_block, sim_states_block = sim_smooth.simulate_tet(timepoints_per_session)
+                sim_data_block, sim_states_block = sim_smooth.simulate_tet(
+                    n_samples=timepoints_per_session
+                )
                 all_data_smooth.append(sim_data_block)
                 all_states_smooth.append(sim_states_block)
                 subject_col_smooth.extend([subj]*timepoints_per_session)

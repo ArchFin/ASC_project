@@ -22,6 +22,7 @@ import os
 import yaml
 from collections import defaultdict
 import seaborn as sns
+from joblib import Parallel, delayed
 
 # Add project root to Python path
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -29,7 +30,7 @@ sys.path.insert(0, project_root)
 from HMM.HMM_methods import CustomHMMClustering, principal_component_finder, csv_splitter
 from Simulated_data.TET_simulation import TETSimulator
 
-def generate_simulated_data(smoothness_value, save_path):
+def generate_simulated_data(smoothness_value, save_path, n_primary_states=4):
     """
     Generate simulated TET data with specified smoothness and save to CSV.
     """
@@ -48,33 +49,67 @@ def generate_simulated_data(smoothness_value, save_path):
     get_indices = lambda features: [feature_names.index(f) for f in features]
     g1_idx, g2_idx, g3_idx = get_indices(group1_features), get_indices(group2_features), get_indices(group3_features)
 
-    # State definitions
+    # --- State Definitions ---
+    all_primary_states = {}
+    
+    # State A: "Focused Internal"
     mean_A = np.full(n_features, 0.5)
     mean_A[g1_idx] = [0.8, 0.85, 0.9, 0.75, 0.75, 0.8, 0.85]
     mean_A[g2_idx] = [0.2, 0.15, 0.2, 0.1, 0.15, 0.2]
     mean_A[g3_idx] = 0.4
-
+    all_primary_states['A'] = {'mean': mean_A, 'cov': np.eye(n_features)*0.05, 'df': 5}
+    
+    # State B: "Somatic Release"
     mean_B = np.full(n_features, 0.5)
     mean_B[g1_idx] = [0.2, 0.15, 0.2, 0.1, 0.15, 0.2, 0.25]
     mean_B[g2_idx] = [0.8, 0.85, 0.9, 0.75, 0.75, 0.8]
     mean_B[g3_idx] = 0.6
-
-    mean_C = (mean_A + mean_B) / 2
-    mean_C[g3_idx] = 0.5
-
-    params = {
-        'A': {'mean': mean_A, 'cov': np.eye(n_features)*0.05, 'df': 5},
-        'B': {'mean': mean_B, 'cov': np.eye(n_features)*0.05, 'df': 5},
-        'C': {'mean': mean_C, 'cov': np.eye(n_features)*0.1, 'df': 5}
-    }
+    all_primary_states['B'] = {'mean': mean_B, 'cov': np.eye(n_features)*0.05, 'df': 5}
     
-    # Transition matrix with longer-lasting C state
-    transition_matrix = [
-        [0.90, 0.00, 0.10],  # state A: mostly stays, can go to C
-        [0.00, 0.90, 0.10],  # state B: mostly stays, can go to C  
-        [0.05, 0.05, 0.90]   # state C: mostly stays (longer duration)
-    ]
-    initial_probs = [1.0, 0.0, 0.0]
+    if n_primary_states >= 3:
+        # State D: "Neutral/Mindful"
+        mean_D = np.full(n_features, 0.5)
+        mean_D[g1_idx] = 0.5
+        mean_D[g2_idx] = 0.3
+        mean_D[g3_idx] = 0.5
+        all_primary_states['D'] = {'mean': mean_D, 'cov': np.eye(n_features)*0.03, 'df': 5}
+
+    if n_primary_states >= 4:
+        # State E: "High Arousal/Overwhelmed" - High on both, high variance
+        mean_E = np.full(n_features, 0.5)
+        mean_E[g1_idx] = 0.8
+        mean_E[g2_idx] = 0.8
+        mean_E[g3_idx] = 0.7
+        all_primary_states['E'] = {'mean': mean_E, 'cov': np.eye(n_features)*0.12, 'df': 5}
+
+    primary_state_labels = list(all_primary_states.keys())[:n_primary_states]
+    primary_states = {label: all_primary_states[label] for label in primary_state_labels}
+
+    # State C: "Metastable/Transition" - Average of all primary states
+    mean_C = np.mean([p['mean'] for p in primary_states.values()], axis=0)
+    
+    params = primary_states.copy()
+    params['C'] = { 'mean': mean_C, 'cov': np.eye(n_features)*0.1,  'df': 5 }
+    
+    final_state_labels = primary_state_labels + ['C']
+    n_states = len(final_state_labels)
+    transition_matrix = np.zeros((n_states, n_states))
+    
+    p_stay = 0.90
+    p_to_C = 1 - p_stay
+    c_idx = final_state_labels.index('C')
+    for i in range(len(primary_states)):
+        transition_matrix[i, i] = p_stay
+        transition_matrix[i, c_idx] = p_to_C
+
+    p_C_stay = 0.90
+    p_C_to_primary = (1 - p_C_stay) / len(primary_states)
+    transition_matrix[c_idx, c_idx] = p_C_stay
+    for i in range(len(primary_states)):
+        transition_matrix[c_idx, i] = p_C_to_primary
+    
+    initial_probs = np.zeros(n_states)
+    initial_probs[0] = 1.0
 
     # Generate data structure
     n_subjects = 10  # Reduced for faster computation
@@ -140,7 +175,7 @@ def generate_simulated_data(smoothness_value, save_path):
     print(f"Saved simulated data to: {save_path}")
     return save_path
 
-def run_validation_for_gamma_and_smoothness(gamma_threshold, data_file_path, config):
+def run_validation_for_gamma_and_smoothness(gamma_threshold, data_file_path, config, n_primary_states=4):
     """
     Run HMM clustering and validation for a specific gamma threshold on pre-generated data.
     """
@@ -169,7 +204,7 @@ def run_validation_for_gamma_and_smoothness(gamma_threshold, data_file_path, con
     )
     
     _, _, _, notransitions_df = clustering.run(
-        num_base_states=2, num_iterations=30, num_repetitions=1,
+        num_base_states=n_primary_states, num_iterations=30, num_repetitions=1,
         gamma_threshold=gamma_threshold, min_nu=9
     )
     print(f"      HMM clustering complete. Output shape: {notransitions_df.shape}")
@@ -212,6 +247,39 @@ def run_validation_for_gamma_and_smoothness(gamma_threshold, data_file_path, con
     
     return acc, nmi, per_state_acc
 
+def run_single_validation(smoothness, gamma, config, temp_data_dir, n_primary_states_to_test):
+    """
+    A wrapper function to run a single validation instance for a given smoothness and gamma.
+    This function can be called in parallel. It assumes data has been pre-generated.
+    """
+    print(f"Starting validation for smoothness={smoothness}, gamma={gamma:.3f}")
+    data_file_path = os.path.join(temp_data_dir, f'sim_data_smooth_{smoothness}.csv')
+
+    try:
+        acc, nmi, per_state_acc = run_validation_for_gamma_and_smoothness(
+            gamma, data_file_path, config, n_primary_states=n_primary_states_to_test
+        )
+        
+        result = {
+            'smoothness': smoothness,
+            'gamma': gamma,
+            'accuracy': acc,
+            'nmi': nmi,
+            'per_state_acc': per_state_acc
+        }
+        print(f"  SUCCESS for smoothness={smoothness}, gamma={gamma:.3f}: Acc={acc:.4f}, NMI={nmi:.4f}")
+        return result
+        
+    except Exception as e:
+        print(f"  ERROR for smoothness={smoothness}, gamma={gamma:.3f}: {e}")
+        return {
+            'smoothness': smoothness,
+            'gamma': gamma,
+            'accuracy': np.nan,
+            'nmi': np.nan,
+            'per_state_acc': {}
+        }
+
 def main():
     """
     Main function to run comprehensive 3D validation.
@@ -226,168 +294,163 @@ def main():
         config = yaml.safe_load(file)
     
     # Define parameter ranges
-    smoothness_values = [0, 1, 2, 3, 4, 5, 10, 15, 20, 25, 30, 40, 50]
+    smoothness_values = [0, 1, 2, 3, 4, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60]
     gamma_thresholds = [0.01, 0.02, 0.03, 0.04, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+    n_primary_states_to_test = 4 # 4 primary states + 1 transition state = 5 total states
     
     print(f"Testing {len(smoothness_values)} smoothness values: {smoothness_values}")
     print(f"Testing {len(gamma_thresholds)} gamma thresholds: {gamma_thresholds}")
     print(f"Total combinations: {len(smoothness_values) * len(gamma_thresholds)}")
     
-    # Results storage
-    results = []
-    smoothness_grid = []
-    gamma_grid = []
-    accuracy_grid = []
-    nmi_grid = []
-    
     temp_data_dir = '/Users/a_fin/Desktop/Year 4/Project/Summer_Data/temp_validation_data'
     os.makedirs(temp_data_dir, exist_ok=True)
-    
-    # Main experiment loop
-    for i, smoothness in enumerate(smoothness_values):
-        print(f"\n{'='*50}")
-        print(f"SMOOTHNESS LEVEL {i+1}/{len(smoothness_values)}: {smoothness}")
-        print(f"{'='*50}")
-        
-        # Generate data for this smoothness level
+
+    # --- Step 1: Generate all required data files in parallel ---
+    print(f"\n{'='*50}")
+    print(f"PRE-GENERATING {len(smoothness_values)} DATA FILES IN PARALLEL")
+    print(f"{'='*50}\n")
+
+    def generate_data_if_needed(smoothness):
         data_file_path = os.path.join(temp_data_dir, f'sim_data_smooth_{smoothness}.csv')
-        generate_simulated_data(smoothness, data_file_path)
-        
-        # Test all gamma thresholds for this smoothness
-        for j, gamma in enumerate(gamma_thresholds):
-            print(f"\n  Gamma {j+1}/{len(gamma_thresholds)}: {gamma:.3f}")
-            
-            try:
-                acc, nmi, per_state_acc = run_validation_for_gamma_and_smoothness(
-                    gamma, data_file_path, config
-                )
-                
-                # Store results
-                results.append({
-                    'smoothness': smoothness,
-                    'gamma': gamma,
-                    'accuracy': acc,
-                    'nmi': nmi,
-                    'per_state_acc': per_state_acc
-                })
-                
-                smoothness_grid.append(smoothness)
-                gamma_grid.append(gamma)
-                accuracy_grid.append(acc)
-                nmi_grid.append(nmi)
-                
-                print(f"    SUCCESS: Acc={acc:.4f}, NMI={nmi:.4f}")
-                
-            except Exception as e:
-                print(f"    ERROR: {e}")
-                # Store NaN results to maintain grid structure
-                results.append({
-                    'smoothness': smoothness,
-                    'gamma': gamma,
-                    'accuracy': np.nan,
-                    'nmi': np.nan,
-                    'per_state_acc': {}
-                })
-                
-                smoothness_grid.append(smoothness)
-                gamma_grid.append(gamma)
-                accuracy_grid.append(np.nan)
-                nmi_grid.append(np.nan)
+        if not os.path.exists(data_file_path):
+            print(f"  Generating data for smoothness = {smoothness}")
+            generate_simulated_data(smoothness, data_file_path, n_primary_states=n_primary_states_to_test)
+        else:
+            print(f"  Data for smoothness = {smoothness} already exists. Skipping generation.")
+
+    Parallel(n_jobs=-1)(
+        delayed(generate_data_if_needed)(s) for s in smoothness_values
+    )
     
+    # Create a list of all parameter combinations
+    param_combinations = [(s, g) for s in smoothness_values for g in gamma_thresholds]
+
+    # --- Step 2: Main experiment loop - PARALLELIZED ---
+    print(f"\n{'='*50}")
+    print(f"RUNNING {len(param_combinations)} VALIDATIONS IN PARALLEL")
+    print(f"{'='*50}\n")
+
+    # Use n_jobs=-1 to use all available CPU cores.
+    # You can set it to a specific number (e.g., n_jobs=4) to limit the number of parallel processes.
+    results = Parallel(n_jobs=-1)(
+        delayed(run_single_validation)(
+            smoothness, gamma, config, temp_data_dir, n_primary_states_to_test
+        ) for smoothness, gamma in param_combinations
+    )
+
     print(f"\n{'='*60}")
     print("EXPERIMENT COMPLETE - GENERATING RESULTS")
     print(f"{'='*60}")
     
-    # Convert to numpy arrays
-    smoothness_grid = np.array(smoothness_grid)
-    gamma_grid = np.array(gamma_grid)
-    accuracy_grid = np.array(accuracy_grid)
-    nmi_grid = np.array(nmi_grid)
+    # Filter out potential None results if any error was not caught
+    results = [r for r in results if r is not None]
+
+    # Convert to numpy arrays for plotting
+    smoothness_grid = np.array([r['smoothness'] for r in results])
+    gamma_grid = np.array([r['gamma'] for r in results])
+    accuracy_grid = np.array([r['accuracy'] for r in results])
+    nmi_grid = np.array([r['nmi'] for r in results])
     
     # Print summary statistics
     valid_acc = accuracy_grid[~np.isnan(accuracy_grid)]
     valid_nmi = nmi_grid[~np.isnan(nmi_grid)]
     
     print(f"Valid results: {len(valid_acc)}/{len(accuracy_grid)}")
-    print(f"Accuracy range: {valid_acc.min():.4f} - {valid_acc.max():.4f} (mean: {valid_acc.mean():.4f})")
-    print(f"NMI range: {valid_nmi.min():.4f} - {valid_nmi.max():.4f} (mean: {valid_nmi.mean():.4f})")
+    if len(valid_acc) > 0:
+        print(f"Accuracy range: {valid_acc.min():.4f} - {valid_acc.max():.4f} (mean: {valid_acc.mean():.4f})")
+    if len(valid_nmi) > 0:
+        print(f"NMI range: {valid_nmi.min():.4f} - {valid_nmi.max():.4f} (mean: {valid_nmi.mean():.4f})")
     
+    # --- Find and print optimal gamma for each smoothness ---
+    results_df = pd.DataFrame(results)
+    if not results_df.empty:
+        results_df.dropna(subset=['accuracy'], inplace=True)
+    
+    if not results_df.empty:
+        optimal_indices = results_df.loc[results_df.groupby('smoothness')['accuracy'].idxmax()]
+        optimal_params = optimal_indices[['smoothness', 'gamma', 'accuracy']].rename(
+            columns={'gamma': 'Optimal Gamma', 'accuracy': 'Max Accuracy'}
+        ).sort_values('smoothness').reset_index(drop=True)
+        
+        print("\n" + "="*60)
+        print("Optimal Gamma for each Smoothness Level (based on max accuracy)")
+        print("="*60)
+        print(optimal_params.to_string())
+        print("="*60 + "\n")
+    else:
+        optimal_params = pd.DataFrame()
+        print("\nNo valid results to determine optimal parameters.\n")
+    # ----------------------------------------------------
+
     # Create 3D plots
-    fig = plt.figure(figsize=(15, 12))
+    fig = plt.figure(figsize=(16, 14))
     
     # 3D Accuracy plot
     ax1 = fig.add_subplot(221, projection='3d')
-    scatter1 = ax1.scatter(gamma_grid, smoothness_grid, accuracy_grid, 
-                          c=accuracy_grid, cmap='viridis', s=50, alpha=0.7)
+    if len(valid_acc) > 0:
+        scatter1 = ax1.scatter(gamma_grid, smoothness_grid, accuracy_grid, 
+                              c=accuracy_grid, cmap='viridis', s=50, alpha=0.7)
+        plt.colorbar(scatter1, ax=ax1, shrink=0.5)
     ax1.set_xlabel('Gamma Threshold')
     ax1.set_ylabel('Data Smoothness')
     ax1.set_zlabel('Accuracy')
     ax1.set_title('3D: Accuracy vs Gamma vs Smoothness')
-    plt.colorbar(scatter1, ax=ax1, shrink=0.5)
     
     # 3D NMI plot
     ax2 = fig.add_subplot(222, projection='3d')
-    scatter2 = ax2.scatter(gamma_grid, smoothness_grid, nmi_grid, 
-                          c=nmi_grid, cmap='plasma', s=50, alpha=0.7)
+    if len(valid_nmi) > 0:
+        scatter2 = ax2.scatter(gamma_grid, smoothness_grid, nmi_grid, 
+                              c=nmi_grid, cmap='plasma', s=50, alpha=0.7)
+        plt.colorbar(scatter2, ax=ax2, shrink=0.5)
     ax2.set_xlabel('Gamma Threshold')
     ax2.set_ylabel('Data Smoothness')
     ax2.set_zlabel('NMI')
     ax2.set_title('3D: NMI vs Gamma vs Smoothness')
-    plt.colorbar(scatter2, ax=ax2, shrink=0.5)
     
     # 2D Heatmap - Accuracy
     ax3 = fig.add_subplot(223)
-    acc_matrix = np.full((len(smoothness_values), len(gamma_thresholds)), np.nan)
-    gamma_to_idx = {val: i for i, val in enumerate(gamma_thresholds)}
-    for result in results:
-        if not np.isnan(result['accuracy']):
-            smooth_idx = smoothness_values.index(result['smoothness'])
-            gamma_idx = gamma_to_idx.get(result['gamma'])
-            if gamma_idx is not None:
-                acc_matrix[smooth_idx, gamma_idx] = result['accuracy']
-    
-    im1 = ax3.imshow(acc_matrix, cmap='viridis', aspect='auto', origin='lower')
-    ax3.set_xticks(np.arange(len(gamma_thresholds)))
-    ax3.set_xticklabels([f'{g:.2f}' for g in gamma_thresholds], rotation=45, ha="right")
-    ax3.set_yticks(np.arange(len(smoothness_values)))
-    ax3.set_yticklabels(smoothness_values)
-    ax3.set_xlabel('Gamma Threshold')
-    ax3.set_ylabel('Data Smoothness')
-    ax3.set_title('2D Heatmap: Accuracy')
-    plt.colorbar(im1, ax=ax3)
-    
+    if not results_df.empty:
+        acc_matrix = results_df.pivot_table(index='smoothness', columns='gamma', values='accuracy')
+        sns.heatmap(acc_matrix, ax=ax3, cmap='viridis', annot=False)
+        ax3.set_title('2D Heatmap: Accuracy')
+        ax3.set_xlabel('Gamma Threshold')
+        ax3.set_ylabel('Data Smoothness')
+
+        # Overlay optimal points on heatmap
+        if not optimal_params.empty:
+            # Ensure correct indexing for scatter plot on heatmap
+            optimal_smoothness_idx = [acc_matrix.index.get_loc(s) for s in optimal_params['smoothness']]
+            optimal_gamma_idx = [acc_matrix.columns.get_loc(g) for g in optimal_params['Optimal Gamma']]
+            ax3.scatter(np.array(optimal_gamma_idx) + 0.5, np.array(optimal_smoothness_idx) + 0.5, marker='o', s=80, facecolors='none', edgecolors='r', linewidth=1.5, label='Optimal Gamma')
+            ax3.legend()
+
     # 2D Heatmap - NMI
     ax4 = fig.add_subplot(224)
-    nmi_matrix = np.full((len(smoothness_values), len(gamma_thresholds)), np.nan)
-    for result in results:
-        if not np.isnan(result['nmi']):
-            smooth_idx = smoothness_values.index(result['smoothness'])
-            gamma_idx = gamma_to_idx.get(result['gamma'])
-            if gamma_idx is not None:
-                nmi_matrix[smooth_idx, gamma_idx] = result['nmi']
-    
-    im2 = ax4.imshow(nmi_matrix, cmap='plasma', aspect='auto', origin='lower')
-    ax4.set_xticks(np.arange(len(gamma_thresholds)))
-    ax4.set_xticklabels([f'{g:.2f}' for g in gamma_thresholds], rotation=45, ha="right")
-    ax4.set_yticks(np.arange(len(smoothness_values)))
-    ax4.set_yticklabels(smoothness_values)
-    ax4.set_xlabel('Gamma Threshold')
-    ax4.set_ylabel('Data Smoothness')
-    ax4.set_title('2D Heatmap: NMI')
-    plt.colorbar(im2, ax=ax4)
-    
-    plt.tight_layout()
+    if not results_df.empty:
+        nmi_matrix = results_df.pivot_table(index='smoothness', columns='gamma', values='nmi')
+        sns.heatmap(nmi_matrix, ax=ax4, cmap='plasma', annot=False)
+        ax4.set_title('2D Heatmap: NMI')
+        ax4.set_xlabel('Gamma Threshold')
+        ax4.set_ylabel('Data Smoothness')
+
+        # Overlay optimal points on NMI heatmap as well
+        if not optimal_params.empty:
+            optimal_smoothness_idx = [nmi_matrix.index.get_loc(s) for s in optimal_params['smoothness']]
+            optimal_gamma_idx = [nmi_matrix.columns.get_loc(g) for g in optimal_params['Optimal Gamma']]
+            ax4.scatter(np.array(optimal_gamma_idx) + 0.5, np.array(optimal_smoothness_idx) + 0.5, marker='o', s=80, facecolors='none', edgecolors='cyan', linewidth=1.5, label='Optimal Gamma (from Acc)')
+            ax4.legend()
+
+    plt.tight_layout(rect=[0, 0, 1, 0.97])
+    fig.suptitle('Comprehensive Validation: Gamma vs. Data Smoothness', fontsize=18, weight='bold')
     
     # Save results
-    save_path = os.path.join(config['savelocation_TET'], 'comprehensive_3d_validation_results.png')
+    save_path = os.path.join(config['savelocation_TET'], f'comprehensive_3d_validation_gamma_smoothness_{n_primary_states_to_test}states.png')
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
     plt.close()
     
-    print(f"3D validation plot saved to: {save_path}")
-    
     # Save results data
     results_df = pd.DataFrame(results)
-    results_csv_path = os.path.join(config['savelocation_TET'], 'comprehensive_3d_validation_gamma_smoothness_data.csv')
+    results_csv_path = os.path.join(config['savelocation_TET'], f'comprehensive_3d_validation_gamma_smoothness_data_{n_primary_states_to_test}states.csv')
     results_df.to_csv(results_csv_path, index=False)
     print(f"Results data saved to: {results_csv_path}")
     
