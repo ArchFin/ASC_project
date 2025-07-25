@@ -1,7 +1,7 @@
 """
 Comprehensive 3D Validation Experiment
 ======================================
-This script combines min_nu (degrees of freedom) validation and smoothness validation 
+This script combines min_nu (degrees of freedom) validation and smoothness validation
 into a single comprehensive experiment that produces a 3D plot showing:
 - X-axis: Minimum Nu values
 - Y-axis: Data smoothness values  
@@ -22,6 +22,7 @@ import os
 import yaml
 from collections import defaultdict
 import seaborn as sns
+from joblib import Parallel, delayed
 
 # Add project root to Python path
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -203,7 +204,7 @@ def run_validation_for_nu_and_smoothness(min_nu_value, data_file_path, config, n
     )
     
     _, _, _, notransitions_df = clustering.run(
-        num_base_states=n_primary_states + 1, num_iterations=30, num_repetitions=1,
+        num_base_states=n_primary_states, num_iterations=30, num_repetitions=1,
         gamma_threshold=0.03, min_nu=min_nu_value  # Using fixed gamma, variable nu
     )
     print(f"      HMM clustering complete. Output shape: {notransitions_df.shape}")
@@ -246,6 +247,35 @@ def run_validation_for_nu_and_smoothness(min_nu_value, data_file_path, config, n
     
     return acc, nmi, per_state_acc
 
+def run_single_validation(smoothness, min_nu, config, temp_data_dir, n_primary_states_to_test):
+    """
+    Wrapper to run a single validation for a given smoothness and min_nu. Assumes data is pre-generated.
+    """
+    print(f"Starting validation for smoothness={smoothness}, min_nu={min_nu}")
+    data_file_path = os.path.join(temp_data_dir, f'sim_data_smooth_{smoothness}.csv')
+    try:
+        acc, nmi, per_state_acc = run_validation_for_nu_and_smoothness(
+            min_nu, data_file_path, config, n_primary_states=n_primary_states_to_test
+        )
+        result = {
+            'smoothness': smoothness,
+            'min_nu': min_nu,
+            'accuracy': acc,
+            'nmi': nmi,
+            'per_state_acc': per_state_acc
+        }
+        print(f"  SUCCESS for smoothness={smoothness}, min_nu={min_nu}: Acc={acc:.4f}, NMI={nmi:.4f}")
+        return result
+    except Exception as e:
+        print(f"  ERROR for smoothness={smoothness}, min_nu={min_nu}: {e}")
+        return {
+            'smoothness': smoothness,
+            'min_nu': min_nu,
+            'accuracy': np.nan,
+            'nmi': np.nan,
+            'per_state_acc': {}
+        }
+
 def main():
     """
     Main function to run comprehensive 3D validation.
@@ -268,76 +298,52 @@ def main():
     print(f"Testing {len(min_nu_values)} min_nu values: {np.round(min_nu_values, 2).tolist()}")
     print(f"Total combinations: {len(smoothness_values) * len(min_nu_values)}")
     
-    # Results storage
-    results = []
-    smoothness_grid = []
-    min_nu_grid = []
-    accuracy_grid = []
-    nmi_grid = []
-    
     temp_data_dir = '/Users/a_fin/Desktop/Year 4/Project/Summer_Data/temp_validation_data'
     os.makedirs(temp_data_dir, exist_ok=True)
-    
-    # Main experiment loop
-    for i, smoothness in enumerate(smoothness_values):
-        print(f"\n{'='*50}")
-        print(f"SMOOTHNESS LEVEL {i+1}/{len(smoothness_values)}: {smoothness}")
-        print(f"{'='*50}")
-        
-        # Generate data for this smoothness level
+
+    # --- Step 1: Generate all required data files in parallel ---
+    print(f"\n{'='*50}")
+    print(f"PRE-GENERATING {len(smoothness_values)} DATA FILES IN PARALLEL")
+    print(f"{'='*50}\n")
+
+    def generate_data_if_needed(smoothness):
         data_file_path = os.path.join(temp_data_dir, f'sim_data_smooth_{smoothness}.csv')
-        generate_simulated_data(smoothness, data_file_path, n_primary_states=n_primary_states_to_test)
-        
-        # Test all min_nu values for this smoothness
-        for j, min_nu in enumerate(min_nu_values):
-            print(f"\n  Min Nu {j+1}/{len(min_nu_values)}: {min_nu:.2f}")
-            
-            try:
-                acc, nmi, per_state_acc = run_validation_for_nu_and_smoothness(
-                    min_nu, data_file_path, config, n_primary_states=n_primary_states_to_test
-                )
-                
-                # Store results
-                results.append({
-                    'smoothness': smoothness,
-                    'min_nu': min_nu,
-                    'accuracy': acc,
-                    'nmi': nmi,
-                    'per_state_acc': per_state_acc
-                })
-                
-                smoothness_grid.append(smoothness)
-                min_nu_grid.append(min_nu)
-                accuracy_grid.append(acc)
-                nmi_grid.append(nmi)
-                
-                print(f"    SUCCESS: Acc={acc:.4f}, NMI={nmi:.4f}")
-                
-            except Exception as e:
-                print(f"    ERROR: {e}")
-                # Store NaN results to maintain grid structure
-                results.append({
-                    'smoothness': smoothness,
-                    'min_nu': min_nu,
-                    'accuracy': np.nan,
-                    'nmi': np.nan,
-                    'per_state_acc': {}
-                })
-                
-                smoothness_grid.append(smoothness)
-                min_nu_grid.append(min_nu)
-                accuracy_grid.append(np.nan)
-                nmi_grid.append(np.nan)
-    
+        if not os.path.exists(data_file_path):
+            print(f"  Generating data for smoothness = {smoothness}")
+            generate_simulated_data(smoothness, data_file_path, n_primary_states=n_primary_states_to_test)
+        else:
+            print(f"  Data for smoothness = {smoothness} already exists. Skipping generation.")
+
+    Parallel(n_jobs=-1)(
+        delayed(generate_data_if_needed)(s) for s in smoothness_values
+    )
+
+    # Create a list of all parameter combinations
+    param_combinations = [(s, n) for s in smoothness_values for n in min_nu_values]
+
+    # --- Step 2: Main experiment loop - PARALLELIZED ---
+    print(f"\n{'='*50}")
+    print(f"RUNNING {len(param_combinations)} VALIDATIONS IN PARALLEL")
+    print(f"{'='*50}\n")
+
+    results = Parallel(n_jobs=-1)(
+        delayed(run_single_validation)(
+            smoothness, min_nu, config, temp_data_dir, n_primary_states_to_test
+        ) for smoothness, min_nu in param_combinations
+    )
+
     print(f"\n{'='*60}")
     print("EXPERIMENT COMPLETE - GENERATING RESULTS")
     print(f"{'='*60}")
     
+    # Filter out potential None results if any error was not caught
+    results = [r for r in results if r is not None]
+
     # Convert to numpy arrays
-    smoothness_grid = np.array(smoothness_grid)
-    min_nu_grid = np.array(min_nu_grid)
-    accuracy_grid = np.array(accuracy_grid)
-    nmi_grid = np.array(nmi_grid)
+    smoothness_grid = np.array([r['smoothness'] for r in results])
+    min_nu_grid = np.array([r['min_nu'] for r in results])
+    accuracy_grid = np.array([r['accuracy'] for r in results])
+    nmi_grid = np.array([r['nmi'] for r in results])
     
     # Print summary statistics
     valid_acc = accuracy_grid[~np.isnan(accuracy_grid)]
