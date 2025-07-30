@@ -416,10 +416,19 @@ class CustomHMMClustering:
         self.principal_components = principal_components
         self.no_of_jumps = no_of_jumps
         self.has_week = 'Week' in df_csv_file_original.columns
+        self.has_type = 'Med_type' in df_csv_file_original.columns
         self.transition_contributions = transition_contributions
 
     def preprocess_data(self):
-        group_keys = ['Subject', 'Week', 'Session'] if self.has_week else ['Subject', 'Session']
+        ##TODO: DONT HARD CODE THIS, MAKE IT ADD TO THE YAML FILE AS AN OPTION
+        if self.has_week and self.has_type :
+            group_keys = ['Subject', 'Week', 'Session', 'Med_type']
+        elif self.has_week:
+            group_keys = ['Subject', 'Week', 'Session']
+        elif self.has_type:
+            group_keys = ['Subject', 'Session', 'Med_type']
+        else:
+            group_keys = ['Subject', 'Session']
         split_dict_skip = {}
         for keys, group in self.df_csv_file_original.groupby(group_keys):
             group = group.iloc[::self.no_of_jumps].copy()
@@ -644,7 +653,16 @@ class CustomHMMClustering:
     def analyze_transitions(self, num_base_states, abrupt_gamma_threshold=0.6):
         self.array['transition_label'] = self.array['labels'].apply(lambda x: str(x + 1))
         self.copy = self.array.copy()
-        group_keys = ['Subject', 'Week', 'Session'] if self.has_week else ['Subject', 'Session']
+        ##TODO: DONT HARD CODE THIS, MAKE IT ADD TO THE YAML FILE AS AN OPTION
+        if self.has_week and self.has_type :
+            group_keys = ['Subject', 'Week', 'Session', 'Med_type']
+        elif self.has_week:
+            group_keys = ['Subject', 'Week', 'Session']
+        elif self.has_type:
+            group_keys = ['Subject', 'Session', 'Med_type']
+        else:
+            group_keys = ['Subject', 'Session']
+
         self.group_transitions = {}
         gamma_columns = [f'gamma_{i}' for i in range(num_base_states + 1)]
         if not all(col in self.array.columns for col in gamma_columns):
@@ -660,7 +678,7 @@ class CustomHMMClustering:
             group_indices = group.index
             total_in_group = len(group_labels)
             threshold = self.calculate_dynamic_threshold(self.avg_fs)
-            min_state_duration = 5
+            min_state_duration = 3
             transitions = []
             segment_start = 0
 
@@ -908,9 +926,19 @@ class Visualiser:
         self.feeling_colors = {feeling: self.color_map.get(i, 'black') 
                   for i, feeling in enumerate(self.feelings)}
         self.has_week = 'Week' in df_csv_file_original.columns
+        self.has_type = 'Med_type' in df_csv_file_original.columns
 
     def preprocess_data(self):
-        group_keys = ['Subject', 'Week', 'Session'] if self.has_week else ['Subject', 'Session']
+        ##TODO: DONT HARD CODE THIS, MAKE IT ADD TO THE YAML FILE AS AN OPTION
+        if self.has_week and self.has_type :
+            group_keys = ['Subject', 'Week', 'Session', 'Med_type']
+        elif self.has_week:
+            group_keys = ['Subject', 'Week', 'Session']
+        elif self.has_type:
+            group_keys = ['Subject', 'Session', 'Med_type']
+        else:
+            group_keys = ['Subject', 'Session']
+
         self.traj_transitions_dict = {}
         self.traj_transitions_dict_original = {}
                 
@@ -1039,11 +1067,19 @@ class Visualiser:
             possible_conditions = self.df_csv_file_original['Condition'].unique()
 
         for group_key, transitions in self.group_transitions.items():
-            if self.has_week:
+            ##TODO: DONT HARD CODE THIS, MAKE IT ADD TO THE YAML FILE AS AN OPTION
+            if self.has_week and self.has_type :
+                subject, week, session, type = group_key
+            elif self.has_week:
                 subject, week, session = group_key
-            else:
-                subject, session = group_key
+                type = None
+            elif self.has_type:
+                subject, session, type = group_key
                 week = None
+            else:
+               subject, session = group_key
+               week = None
+               type = None
 
             original_group = self.traj_transitions_dict_original.get(group_key, pd.DataFrame())
             if original_group.empty:
@@ -1059,6 +1095,7 @@ class Visualiser:
                     'Subject': subject,
                     'Week': week,
                     'Session': session,
+                    'Med_type': type,
                     'Start Time (s)': start_time,
                     'End Time (s)': end_time,
                     'Duration (s)': duration,

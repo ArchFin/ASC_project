@@ -1,5 +1,5 @@
 # filepath: /Users/a_fin/Desktop/Year 4/Project/ASC_project/Meditation.yaml
-filelocation_TET: '/Users/a_fin/Desktop/Year 4/Project/Data/Meditation_TET_data.csv'  # File location of the Temporal Experience Traces (TET) for Breathwork, needs to be in CSV format.
+filelocation_TET: '/Users/a_fin/Desktop/Year 4/Project/Data/Meditation_TET_data_labelled_noThought.csv'  # File location of the Temporal Experience Traces (TET) for Breathwork, needs to be in CSV format.
 
 savelocation_TET: '/Users/a_fin/Desktop/Year 4/Project/Data/'
 
