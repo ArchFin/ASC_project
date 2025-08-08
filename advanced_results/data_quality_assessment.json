@@ -1,0 +1,22 @@
+{
+  "good_subjects": [
+    "s01",
+    "s03",
+    "s04",
+    "s07",
+    "s08",
+    "s10",
+    "s13",
+    "s14",
+    "s17",
+    "s18",
+    "s21"
+  ],
+  "problematic_subjects": [],
+  "overall_class_dist": {
+    "1": 4633,
+    "2": 4690,
+    "3": 5675
+  },
+  "recommendations": "exclude_problematic"
+}

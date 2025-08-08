@@ -30,7 +30,7 @@ sys.path.insert(0, project_root)
 from HMM.HMM_methods import CustomHMMClustering, principal_component_finder, csv_splitter
 from Simulated_data.TET_simulation import TETSimulator
 
-def generate_simulated_data(smoothness_value, save_path, n_primary_states=4):
+def generate_simulated_data(smoothness_value, save_path, n_primary_states=2):
     """
     Generate simulated TET data with specified smoothness and save to CSV.
     """
@@ -175,7 +175,7 @@ def generate_simulated_data(smoothness_value, save_path, n_primary_states=4):
     print(f"Saved simulated data to: {save_path}")
     return save_path
 
-def run_validation_for_gamma_and_smoothness(gamma_threshold, data_file_path, config, n_primary_states=4):
+def run_validation_for_gamma_and_smoothness(gamma_threshold, data_file_path, config, n_primary_states=2):
     """
     Run HMM clustering and validation for a specific gamma threshold on pre-generated data.
     """
@@ -200,7 +200,7 @@ def run_validation_for_gamma_and_smoothness(gamma_threshold, data_file_path, con
     clustering = CustomHMMClustering(
         data_file_path, config['savelocation_TET'],
         df_csv_file_original, feelings, principal_components,
-        config['no_of_jumps'], 0.1
+        config['no_of_jumps'], 6
     )
     
     _, _, _, notransitions_df = clustering.run(
@@ -296,8 +296,8 @@ def main():
     # Define parameter ranges
     smoothness_values = [0, 1, 2, 3, 4, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60]
     gamma_thresholds = [0.01, 0.02, 0.03, 0.04, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
-    n_primary_states_to_test = 4 # 4 primary states + 1 transition state = 5 total states
-    
+    n_primary_states_to_test = 2  # 2 primary states + 1 transition state = 3 total states
+
     print(f"Testing {len(smoothness_values)} smoothness values: {smoothness_values}")
     print(f"Testing {len(gamma_thresholds)} gamma thresholds: {gamma_thresholds}")
     print(f"Total combinations: {len(smoothness_values) * len(gamma_thresholds)}")

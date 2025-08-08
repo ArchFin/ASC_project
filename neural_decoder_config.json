@@ -1,0 +1,30 @@
+{
+  "feature_names": [
+    "psd global offset",
+    "wSMI 2 global",
+    "psd global gamma",
+    "wSMI 4 global",
+    "psd global beta",
+    "psd global exponent",
+    "wSMI 8 global",
+    "psd global delta",
+    "psd global alpha",
+    "wSMI 1 global",
+    "LZC global",
+    "LZsum global",
+    "psd global theta",
+    "pe 2 global",
+    "pe 1 global",
+    "pe 4 global",
+    "pe 8 global"
+  ],
+  "cv_performance": {
+    "avg_auc_class_1": 0.592864610184178,
+    "avg_auc_class_2": 0.5767407808890486,
+    "avg_auc_class_3": 0.5341463953721118,
+    "std_auc_class_1": 0.1331012006793755,
+    "std_auc_class_2": 0.12977592846793864,
+    "std_auc_class_3": 0.08460923061549384
+  },
+  "notes": "Hyperparameters vary per fold due to parallel processing. Check individual fold results for details."
+}

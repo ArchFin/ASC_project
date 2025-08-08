@@ -1,0 +1,36 @@
+{
+  "selected_features": [
+    8,
+    15,
+    16,
+    7,
+    14,
+    12,
+    2,
+    5,
+    10,
+    11,
+    0,
+    4
+  ],
+  "feature_names": [
+    "psd global offset",
+    "wSMI 2 global",
+    "psd global gamma",
+    "wSMI 4 global",
+    "psd global beta",
+    "psd global exponent",
+    "wSMI 8 global",
+    "psd global delta",
+    "psd global alpha",
+    "wSMI 1 global",
+    "LZC global",
+    "LZsum global",
+    "psd global theta",
+    "pe 2 global",
+    "pe 1 global",
+    "pe 4 global",
+    "pe 8 global"
+  ],
+  "n_features_selected": 12
+}

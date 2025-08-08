@@ -1,0 +1,12 @@
+{
+  "baseline_auc": 0.5160146134906587,
+  "cnn_auc": 0.5014855492790288,
+  "improvement": -0.014529064211629916,
+  "input_shape": [
+    8,
+    8,
+    1
+  ],
+  "num_classes": 3,
+  "training_epochs": 15
+}

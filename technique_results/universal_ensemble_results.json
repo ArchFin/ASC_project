@@ -1,0 +1,26 @@
+{
+  "universal_ensemble_auc_mean": 0.5223020619452802,
+  "universal_ensemble_auc_std": 0.045930852934226704,
+  "individual_model_results": {
+    "rf": {
+      "mean": 0.5316686441945918,
+      "std": 0.0646079447591114
+    },
+    "gb": {
+      "mean": 0.5170983190435554,
+      "std": 0.03986705420884023
+    },
+    "svm": {
+      "mean": 0.5082977654728377,
+      "std": 0.05522023664879813
+    },
+    "lr": {
+      "mean": 0.5220038353709259,
+      "std": 0.05220201246823851
+    }
+  },
+  "improvement_over_baseline": -0.03369793805471988,
+  "n_folds": 10,
+  "universal_features_count": 28,
+  "original_features_count": 17
+}

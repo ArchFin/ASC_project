@@ -1,0 +1,12 @@
+{
+  "baseline_auc": 0.5160146134906587,
+  "enhanced_auc": 0.5141120440673178,
+  "improvement": -0.001902569423340883,
+  "new_features": [
+    "alpha_theta_ratio",
+    "mean_perm_entropy",
+    "std_perm_entropy"
+  ],
+  "original_feature_count": 17,
+  "enhanced_feature_count": 20
+}

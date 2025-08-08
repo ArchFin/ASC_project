@@ -1,0 +1,9 @@
+{
+  "baseline_auc": 0.5160146134906587,
+  "coral_auc": 0.5160146134906587,
+  "improvement": 0.0,
+  "coral_transform_shape": [
+    17,
+    17
+  ]
+}

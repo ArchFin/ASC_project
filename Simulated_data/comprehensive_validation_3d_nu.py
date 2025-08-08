@@ -30,7 +30,7 @@ sys.path.insert(0, project_root)
 from HMM.HMM_methods import CustomHMMClustering, principal_component_finder, csv_splitter
 from Simulated_data.TET_simulation import TETSimulator
 
-def generate_simulated_data(smoothness_value, save_path, n_primary_states=4):
+def generate_simulated_data(smoothness_value, save_path, n_primary_states=2):
     """
     Generate simulated TET data with specified smoothness and save to CSV.
     """
@@ -175,7 +175,7 @@ def generate_simulated_data(smoothness_value, save_path, n_primary_states=4):
     print(f"Saved simulated data to: {save_path}")
     return save_path
 
-def run_validation_for_nu_and_smoothness(min_nu_value, data_file_path, config, n_primary_states=4):
+def run_validation_for_nu_and_smoothness(min_nu_value, data_file_path, config, n_primary_states=2):
     """
     Run HMM clustering and validation for a specific min_nu value on pre-generated data.
     """
@@ -200,12 +200,12 @@ def run_validation_for_nu_and_smoothness(min_nu_value, data_file_path, config, n
     clustering = CustomHMMClustering(
         data_file_path, config['savelocation_TET'],
         df_csv_file_original, feelings, principal_components,
-        config['no_of_jumps'], 0.1
+        config['no_of_jumps'], 6
     )
     
     _, _, _, notransitions_df = clustering.run(
         num_base_states=n_primary_states, num_iterations=30, num_repetitions=1,
-        gamma_threshold=0.03, min_nu=min_nu_value  # Using fixed gamma, variable nu
+        gamma_threshold=0.01, min_nu=min_nu_value  # Using fixed gamma, variable nu
     )
     print(f"      HMM clustering complete. Output shape: {notransitions_df.shape}")
 
@@ -290,9 +290,9 @@ def main():
         config = yaml.safe_load(file)
     
     # Define parameter ranges
-    smoothness_values = [0, 1, 2, 3, 4, 5, 10, 15, 20, 30, 40, 50]
+    smoothness_values = [0, 1, 2, 3, 4, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60]
     min_nu_values = np.arange(2, 31) # Use integers from 2 to 30
-    n_primary_states_to_test = 4 # 4 primary states + 1 transition state = 5 total states
+    n_primary_states_to_test = 2 # 2 primary states + 1 transition state = 3 total states
 
     print(f"Testing {len(smoothness_values)} smoothness values: {smoothness_values}")
     print(f"Testing {len(min_nu_values)} min_nu values: {np.round(min_nu_values, 2).tolist()}")

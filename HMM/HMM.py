@@ -46,12 +46,39 @@ df_TET_feelings_prin_dict = principal_component_finder_instance.PCA_split(split_
 # Note: Here we use the original CSV file (df_csv_file_original) for clustering.
 # You might wish to change this if you have a different dataset.
 no_of_jumps = config['no_of_jumps']
+# smoothness = CustomHMMClustering.calculate_smoothness(df_csv_file_original, feelings)
+# print(f"Data smoothness: {smoothness}")
 
-transition_contributions = 0.1
+# # Try to load optimal parameters from realistic validation results
+# realistic_params_path = '/Users/a_fin/Desktop/Year 4/Project/Data/realistic_optimal_parameters_2states.csv'
+# if os.path.exists(realistic_params_path):
+#     print("Using realistic smoothness validation results...")
+#     optimal_params = CustomHMMClustering.get_optimal_params_for_smoothness(
+#         smoothness, realistic_params_path
+#     )
+# else:
+#     print("Realistic validation results not found. Using default parameters...")
+#     print("Consider running realistic_smoothness_validation.py first for optimal results.")
+#     optimal_params = {
+#         'gamma_threshold': 0.03,
+#         'min_nu': 9,
+#         'transition_contribution': 6,
+#         'selection_method': 'default'
+#     }
+
+# gamma_threshold = optimal_params['gamma_threshold']
+# min_nu = optimal_params['min_nu'] 
+# transition_contributions = optimal_params['transition_contribution']
+
+# print(f"Using parameters: gamma={gamma_threshold}, min_nu={min_nu}, tc={transition_contributions}")
+# print(f"Selection method: {optimal_params.get('selection_method', 'unknown')}")
+
+
+
 clustering = CustomHMMClustering(config['filelocation_TET'], config['savelocation_TET'],
-                                    df_csv_file_original, feelings, principal_components, no_of_jumps, transition_contributions)
+                                    df_csv_file_original, feelings, principal_components, no_of_jumps, 12)
 
-results_array, dictionary_clust_labels, transitions, notransitions = clustering.run(num_base_states=config['no_clust'], num_iterations=30, num_repetitions=1, gamma_threshold = 0.01, min_nu = 2)
+results_array, dictionary_clust_labels, transitions, notransitions = clustering.run(num_base_states=config['no_clust'], num_iterations=30, num_repetitions=1, gamma_threshold = 0.01, min_nu = 9)
 results_array.to_csv('/Users/a_fin/Desktop/Year 4/Project/Data/HMM_output_adjusted.csv', index=False)
 notransitions.to_csv('/Users/a_fin/Desktop/Year 4/Project/Data/HMM_output_adjusted_notransitions.csv', index=False)
 

@@ -259,8 +259,8 @@ class HMMModel:
         and reduce transitions into/out of the extra state.
         """
         # Set a higher prior for base states and lower for the extra state.
-        base_prior = 1.1 # Reduced from 2.0 to make transitions more likely
-        extra_prior = 1.0 # Increased from 0.1 to be less punitive
+        base_prior = 1.0 # Reduced from 2.0 to make transitions more likely
+        extra_prior = 2.0 # Increased from 0.1 to be less punitive
         prior = np.full((num_states, num_states), base_prior)
         # For transitions involving the extra (last) state, use the extra_prior.
         prior[-1, :] = extra_prior
@@ -832,26 +832,149 @@ class CustomHMMClustering:
         with open(os.path.join(self.savelocation_TET, 'middle_state_validation.txt'), 'w') as f:
             f.write(msg)
 
-        def calculate_and_report_smoothness(self):
-            """
-            Calculates the smoothness of the input data and saves it to a file.
-            Smoothness is defined as the mean absolute difference of consecutive timepoints.
-            A lower value indicates smoother data.
-            """
-            data_values = self.array[self.feelings].values
-            # Calculate difference along time axis (axis=0)
-            smoothness_metric = np.mean(np.abs(np.diff(data_values, axis=0)))
+    def calculate_and_report_smoothness(self):
+        """
+        Calculates the smoothness of the input data and saves it to a file.
+        Smoothness is defined as the mean absolute difference of consecutive timepoints.
+        A lower value indicates smoother data.
+        """
+        data_values = self.array[self.feelings].values
+        # Calculate difference along time axis (axis=0)
+        smoothness_metric = np.mean(np.abs(np.diff(data_values, axis=0)))
+        
+        msg = f"Data smoothness metric (mean absolute consecutive difference): {smoothness_metric:.6f}\n"
+        print(msg)
+        
+        # Save to file for traceability
+        with open(os.path.join(self.savelocation_TET, 'data_smoothness_metric.txt'), 'w') as f:
+            f.write(msg)
+        
+        return smoothness_metric
+
+    @staticmethod
+    def calculate_smoothness(df, feelings):
+        """
+        Calculate smoothness metric for any dataset.
+        """
+        data_values = df[feelings].values
+        smoothness_metric = np.mean(np.abs(np.diff(data_values, axis=0)))
+        return smoothness_metric
+
+    @staticmethod
+    def get_optimal_params_for_smoothness(smoothness_metric, optimal_params_csv_path):
+        """
+        Load optimal parameters table and find the best match for the given smoothness.
+        Uses interpolation for out-of-range values and handles realistic smoothness ranges.
+        Returns a dictionary with optimal gamma_threshold, min_nu, and transition_contribution.
+        """
+        try:
+            optimal_params_df = pd.read_csv(optimal_params_csv_path)
             
-            msg = f"Data smoothness metric (mean absolute consecutive difference): {smoothness_metric:.6f}\n"
-            print(msg)
+            # Sort by smoothness for interpolation
+            optimal_params_df = optimal_params_df.sort_values('smoothness')
             
-            # Save to file for traceability
-            with open(os.path.join(self.savelocation_TET, 'data_smoothness_metric.txt'), 'w') as f:
-                f.write(msg)
+            # Handle different possible column naming conventions
+            gamma_col = None
+            nu_col = None
+            tc_col = None
+            
+            for col in optimal_params_df.columns:
+                if 'gamma' in col.lower() or 'Gamma' in col:
+                    gamma_col = col
+                elif 'nu' in col.lower() or 'Nu' in col:
+                    nu_col = col
+                elif 'transition' in col.lower() or 'tc' in col.lower() or 'TC' in col:
+                    tc_col = col
+            
+            # Check if smoothness is within validation range
+            min_smoothness = optimal_params_df['smoothness'].min()
+            max_smoothness = optimal_params_df['smoothness'].max()
+            
+            print(f"Data smoothness: {smoothness_metric:.6f}")
+            print(f"Validation range: {min_smoothness:.6f} - {max_smoothness:.6f}")
+            
+            if smoothness_metric < min_smoothness:
+                print(f"WARNING: Data smoothness ({smoothness_metric:.6f}) is below validation range!")
+                print(f"Using parameters for smoothest validated data (smoothness = {min_smoothness})")
+                optimal_row = optimal_params_df.iloc[0]
+                method = "extrapolated_low"
+            elif smoothness_metric > max_smoothness:
+                print(f"WARNING: Data smoothness ({smoothness_metric:.6f}) is above validation range!")
+                print(f"Using parameters for least smooth validated data (smoothness = {max_smoothness})")
+                optimal_row = optimal_params_df.iloc[-1]
+                method = "extrapolated_high"
+            else:
+                # Interpolate between closest values
+                closest_idx = (optimal_params_df['smoothness'] - smoothness_metric).abs().idxmin()
+                optimal_row = optimal_params_df.loc[closest_idx]
+                method = "interpolated"
+                
+                # Try linear interpolation if not exact match
+                if abs(optimal_row['smoothness'] - smoothness_metric) > 0.001:
+                    # Find the two closest points for interpolation
+                    diff = optimal_params_df['smoothness'] - smoothness_metric
+                    
+                    # Find closest lower and upper bounds
+                    lower_mask = diff <= 0
+                    upper_mask = diff >= 0
+                    
+                    if lower_mask.any() and upper_mask.any():
+                        lower_row = optimal_params_df[lower_mask].iloc[-1]  # Closest from below
+                        upper_row = optimal_params_df[upper_mask].iloc[0]   # Closest from above
+                        
+                        # Linear interpolation weight
+                        if upper_row['smoothness'] != lower_row['smoothness']:
+                            weight = (smoothness_metric - lower_row['smoothness']) / (upper_row['smoothness'] - lower_row['smoothness'])
+                            
+                            # Interpolate parameters
+                            interpolated_params = {}
+                            if gamma_col:
+                                interpolated_params[gamma_col] = lower_row[gamma_col] + weight * (upper_row[gamma_col] - lower_row[gamma_col])
+                            if nu_col:
+                                interpolated_params[nu_col] = int(lower_row[nu_col] + weight * (upper_row[nu_col] - lower_row[nu_col]))
+                            if tc_col:
+                                interpolated_params[tc_col] = int(lower_row[tc_col] + weight * (upper_row[tc_col] - lower_row[tc_col]))
+                            
+                            # Create interpolated row
+                            optimal_row = pd.Series({
+                                'smoothness': smoothness_metric,
+                                **interpolated_params
+                            })
+                            method = "linear_interpolated"
+                            print(f"Linear interpolation between smoothness {lower_row['smoothness']:.6f} and {upper_row['smoothness']:.6f}")
+            
+            # Extract parameters with defaults
+            optimal_params = {
+                'gamma_threshold': optimal_row.get(gamma_col, 0.03),
+                'min_nu': int(optimal_row.get(nu_col, 9)),
+                'transition_contribution': int(optimal_row.get(tc_col, 6)),
+                'matched_smoothness': optimal_row.get('smoothness', smoothness_metric),
+                'smoothness_difference': abs(optimal_row.get('smoothness', smoothness_metric) - smoothness_metric),
+                'selection_method': method
+            }
+            
+            print(f"Selected parameters using method: {method}")
+            print(f"  Optimal gamma_threshold: {optimal_params['gamma_threshold']:.6f}")
+            print(f"  Optimal min_nu: {optimal_params['min_nu']}")
+            print(f"  Optimal transition_contribution: {optimal_params['transition_contribution']}")
+            
+            return optimal_params
+            
+        except Exception as e:
+            print(f"Error loading optimal parameters: {e}")
+            print("Using default parameters")
+            return {
+                'gamma_threshold': 0.03,
+                'min_nu': 9,
+                'transition_contribution': 6,
+                'matched_smoothness': None,
+                'smoothness_difference': None,
+                'selection_method': 'default_fallback'
+            }
 
     def run(self, num_base_states, num_iterations, num_repetitions, gamma_threshold, min_nu, base_seed = 12345, ):
         self.preprocess_data()
-        # self.calculate_and_report_smoothness()
+        self.calculate_and_report_smoothness()
         self.perform_clustering(num_base_states, num_iterations, num_repetitions, min_nu,  base_seed =12345)
         self.calculate_dictionary_clust_labels()
         self.plot_results()

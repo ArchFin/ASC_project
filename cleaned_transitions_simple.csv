@@ -1,0 +1,304 @@
+Subject,Week,Session,Med_type,Start Time (s),End Time (s),Duration (s),From State,To State,Transition Type,Transition
+1425,,685015_TET.mat,Open Monitoring,364,420,56,2,5,gradual,2→5
+1425,,688320_TET.mat,Breath,84,168,84,1,5,gradual,1→5
+1425,,688320_TET.mat,Breath,280,364,84,5,1,gradual,5→1
+1425,,695367_TET.mat,Loving Kindness,168,280,112,5,4,gradual,5→4
+1425,,695367_TET.mat,Loving Kindness,308,420,112,4,5,gradual,4→5
+1425,,697687_TET.mat,Breath,56,252,196,1,5,gradual,1→5
+1425,,713438_TET.mat,Open Monitoring,84,140,56,5,2,gradual,5→2
+1425,,713438_TET.mat,Open Monitoring,364,420,56,2,5,gradual,2→5
+1425,,721257_TET.mat,Open Monitoring,224,336,112,5,1,gradual,5→1
+1425,,723179_TET.mat,Open Monitoring,56,112,56,1,5,gradual,1→5
+1425,,741735_TET.mat,Breath,140,224,84,1,5,gradual,1→5
+1425,,745425_TET.mat,Breath,112,308,196,5,1,gradual,5→1
+1425,,754531_TET.mat,Open Monitoring,112,224,112,5,1,gradual,5→1
+1425,,756369_TET.mat,Breath,84,168,84,5,1,gradual,5→1
+1425,,756369_TET.mat,Breath,224,336,112,1,5,gradual,1→5
+1425,,780525_TET.mat,Breath,28,196,168,5,1,gradual,5→1
+1425,,787041_TET.mat,Open Monitoring,252,308,56,2,5,gradual,2→5
+1425,,800859_TET.mat,Breath,112,252,140,5,1,gradual,5→1
+1425,,800859_TET.mat,Breath,280,364,84,1,5,gradual,1→5
+1425,,806983_TET.mat,Open Monitoring,364,420,56,2,5,gradual,2→5
+1425,,815559_TET.mat,Breath,28,196,168,5,1,gradual,5→1
+1425,,830769_TET.mat,Breath,196,308,112,5,4,gradual,5→4
+1425,,840360_TET.mat,Open Monitoring,140,224,84,5,3,gradual,5→3
+1425,,842556_TET.mat,Open Monitoring,84,224,140,5,2,gradual,5→2
+1425,,842556_TET.mat,Open Monitoring,364,420,56,2,5,gradual,2→5
+1425,,863011_TET.mat,Breath,84,280,196,5,1,gradual,5→1
+1465_WashingtonQuelea,,832979_TET.mat,Breath,364,420,56,1,5,gradual,1→5
+1465_WashingtonQuelea,,834627_TET.mat,Breath,364,420,56,2,5,gradual,2→5
+1465_WashingtonQuelea,,834709_TET.mat,Loving Kindness,56,140,84,5,1,gradual,5→1
+1465_WashingtonQuelea,,834709_TET.mat,Loving Kindness,252,308,56,1,5,gradual,1→5
+1465_WashingtonQuelea,,835729_TET.mat,Open Monitoring,336,420,84,4,5,gradual,4→5
+1465_WashingtonQuelea,,835948_TET.mat,Open Monitoring,280,364,84,4,5,gradual,4→5
+1465_WashingtonQuelea,,835984_TET.mat,Open Monitoring,196,364,168,4,2,gradual,4→2
+1465_WashingtonQuelea,,835984_TET.mat,Open Monitoring,364,420,56,2,5,gradual,2→5
+1465_WashingtonQuelea,,836139_TET.mat,Loving Kindness,196,336,140,5,4,gradual,5→4
+1465_WashingtonQuelea,,836139_TET.mat,Loving Kindness,364,420,56,4,5,gradual,4→5
+1465_WashingtonQuelea,,837916_TET.mat,Open Monitoring,168,308,140,3,2,gradual,3→2
+1465_WashingtonQuelea,,837919_TET.mat,Open Monitoring,224,280,56,3,5,gradual,3→5
+1465_WashingtonQuelea,,837919_TET.mat,Open Monitoring,364,420,56,1,5,gradual,1→5
+1465_WashingtonQuelea,,837922_TET.mat,Breath,112,224,112,2,5,gradual,2→5
+1733_BandjarmasinKomodoDragon,,584403_TET.mat,Breath,140,336,196,5,2,gradual,5→2
+1733_BandjarmasinKomodoDragon,,584403_TET.mat,Breath,364,420,56,2,5,gradual,2→5
+1733_BandjarmasinKomodoDragon,,587421_TET.mat,Breath,364,420,56,1,5,gradual,1→5
+1733_BandjarmasinKomodoDragon,,592231_TET.mat,Breath,140,252,112,5,1,gradual,5→1
+1733_BandjarmasinKomodoDragon,,601307_TET.mat,Breath,28,140,112,5,1,gradual,5→1
+1733_BandjarmasinKomodoDragon,,601307_TET.mat,Breath,308,420,112,1,5,gradual,1→5
+1733_BandjarmasinKomodoDragon,,640677_TET.mat,Open Monitoring,56,252,196,5,3,gradual,5→3
+1733_BandjarmasinKomodoDragon,,641241_TET.mat,Open Monitoring,28,168,140,5,2,gradual,5→2
+1733_BandjarmasinKomodoDragon,,643860_TET.mat,Open Monitoring,140,252,112,1,5,gradual,1→5
+1733_BandjarmasinKomodoDragon,,646688_TET.mat,Breath,224,420,196,2,5,gradual,2→5
+1733_BandjarmasinKomodoDragon,,648345_TET.mat,Breath,84,196,112,1,5,gradual,1→5
+1733_BandjarmasinKomodoDragon,,648439_TET.mat,Breath,112,168,56,1,5,gradual,1→5
+1733_BandjarmasinKomodoDragon,,648439_TET.mat,Breath,168,252,84,5,1,gradual,5→1
+1733_BandjarmasinKomodoDragon,,650335_TET.mat,Breath,28,140,112,5,2,gradual,5→2
+1733_BandjarmasinKomodoDragon,,650948_TET.mat,Breath,56,196,140,5,2,gradual,5→2
+1733_BandjarmasinKomodoDragon,,653177_TET.mat,Open Monitoring,28,140,112,5,3,gradual,5→3
+1733_BandjarmasinKomodoDragon,,656151_TET.mat,Loving Kindness,280,392,112,1,5,gradual,1→5
+1733_BandjarmasinKomodoDragon,,663704_TET.mat,Breath,168,364,196,5,2,gradual,5→2
+1733_BandjarmasinKomodoDragon,,663872_TET.mat,Open Monitoring,84,168,84,5,3,gradual,5→3
+1733_BandjarmasinKomodoDragon,,669220_TET.mat,Loving Kindness,56,168,112,1,5,gradual,1→5
+1733_BandjarmasinKomodoDragon,,670613_TET.mat,Open Monitoring,364,420,56,3,5,gradual,3→5
+184_WestYorkshireWalrus,,901100_TET.mat,Breath,56,308,252,4,5,gradual,4→5
+184_WestYorkshireWalrus,,901170-2_TET.mat,Loving Kindness,140,308,168,4,5,gradual,4→5
+184_WestYorkshireWalrus,,901170-3_TET.mat,Breath,252,308,56,5,4,gradual,5→4
+184_WestYorkshireWalrus,,901191_TET.mat,Open Monitoring,336,420,84,4,5,gradual,4→5
+184_WestYorkshireWalrus,,902497_TET.mat,Loving Kindness,56,168,112,3,5,gradual,3→5
+184_WestYorkshireWalrus,,902497_TET.mat,Loving Kindness,168,280,112,5,3,gradual,5→3
+184_WestYorkshireWalrus,,904786_TET.mat,Breath,84,224,140,3,5,gradual,3→5
+184_WestYorkshireWalrus,,904786_TET.mat,Breath,112,252,140,5,1,gradual,5→1
+184_WestYorkshireWalrus,,904808_TET.mat,Open Monitoring,196,252,56,3,5,gradual,3→5
+1867_BucharestTrout,,1278665_TET.mat,Breath,140,308,168,3,4,gradual,3→4
+1867_BucharestTrout,,1278665_TET.mat,Breath,364,420,56,4,5,gradual,4→5
+1867_BucharestTrout,,1278672_TET.mat,Open Monitoring,56,224,168,5,4,gradual,5→4
+1867_BucharestTrout,,1278672_TET.mat,Open Monitoring,336,420,84,4,5,gradual,4→5
+1867_BucharestTrout,,901032_TET.mat,Breath,84,140,56,3,5,gradual,3→5
+1867_BucharestTrout,,901032_TET.mat,Breath,196,336,140,5,4,gradual,5→4
+1867_BucharestTrout,,901166_TET.mat,Loving Kindness,364,420,56,4,5,gradual,4→5
+1867_BucharestTrout,,901168_TET.mat,Loving Kindness,56,196,140,5,4,gradual,5→4
+1867_BucharestTrout,,901168_TET.mat,Loving Kindness,364,420,56,4,5,gradual,4→5
+1867_BucharestTrout,,901270_TET.mat,Open Monitoring,280,420,140,4,5,gradual,4→5
+1867_BucharestTrout,,902542_TET.mat,Loving Kindness,252,420,168,5,4,gradual,5→4
+1867_BucharestTrout,,902619_TET.mat,Loving Kindness,84,308,224,5,4,gradual,5→4
+1867_BucharestTrout,,902839_TET.mat,Open Monitoring,56,112,56,4,5,gradual,4→5
+1867_BucharestTrout,,902989_TET.mat,Breath,364,420,56,4,5,gradual,4→5
+1867_BucharestTrout,,904608_TET.mat,Open Monitoring,224,280,56,4,5,gradual,4→5
+1867_BucharestTrout,,904784_TET.mat,Breath,84,308,224,5,4,gradual,5→4
+1867_BucharestTrout,,904806_TET.mat,Open Monitoring,364,420,56,4,5,gradual,4→5
+1867_GoianiaCrane,,832860_TET.mat,Breath,168,224,56,4,5,gradual,4→5
+1867_GoianiaCrane,,832860_TET.mat,Breath,280,420,140,4,5,gradual,4→5
+1867_GoianiaCrane,,834143_TET.mat,Loving Kindness,224,364,140,4,3,gradual,4→3
+1867_GoianiaCrane,,834590_TET.mat,Open Monitoring,56,140,84,3,2,gradual,3→2
+1867_GoianiaCrane,,834590_TET.mat,Open Monitoring,168,252,84,2,3,gradual,2→3
+1867_GoianiaCrane,,834590_TET.mat,Open Monitoring,364,420,56,3,5,gradual,3→5
+1867_GoianiaCrane,,834611_TET.mat,Open Monitoring,112,252,140,4,5,gradual,4→5
+1867_GoianiaCrane,,834611_TET.mat,Open Monitoring,140,252,112,5,3,gradual,5→3
+1867_GoianiaCrane,,834611_TET.mat,Open Monitoring,280,420,140,3,5,gradual,3→5
+1867_GoianiaCrane,,835950_TET.mat,Open Monitoring,56,224,168,5,3,gradual,5→3
+1867_GoianiaCrane,,842436_TET.mat,Breath,252,392,140,1,5,gradual,1→5
+1867_GoianiaCrane,,842441_TET.mat,Open Monitoring,336,420,84,4,5,gradual,4→5
+1867_GoianiaCrane,,842442_TET.mat,Open Monitoring,364,420,56,3,5,gradual,3→5
+1871,,590112_TET.mat,Loving Kindness,112,252,140,1,5,gradual,1→5
+1871,,590112_TET.mat,Loving Kindness,140,280,140,5,1,gradual,5→1
+1871,,594329_TET.mat,Open Monitoring,196,308,112,5,1,gradual,5→1
+1871,,648880_TET.mat,Open Monitoring,364,420,56,3,5,gradual,3→5
+1871,,654943_TET.mat,Breath,224,308,84,5,1,gradual,5→1
+1871,,654943_TET.mat,Breath,364,420,56,1,5,gradual,1→5
+1871,,699477_TET.mat,Loving Kindness,168,280,112,5,4,gradual,5→4
+1871,,699477_TET.mat,Loving Kindness,364,420,56,4,5,gradual,4→5
+1871,,725076_TET.mat,Loving Kindness,84,196,112,5,3,gradual,5→3
+1871,,725076_TET.mat,Loving Kindness,336,420,84,3,5,gradual,3→5
+1871,,742053_TET.mat,Open Monitoring,84,224,140,5,3,gradual,5→3
+1871,,742053_TET.mat,Open Monitoring,364,420,56,3,5,gradual,3→5
+1871,,754782_TET.mat,Loving Kindness,140,252,112,5,3,gradual,5→3
+1871,,754782_TET.mat,Loving Kindness,336,420,84,3,5,gradual,3→5
+1871,,767014_TET.mat,Loving Kindness,56,252,196,5,4,gradual,5→4
+1991_MendozaCow,,606403_TET.mat,Loving Kindness,112,308,196,5,4,gradual,5→4
+1991_MendozaCow,,606403_TET.mat,Loving Kindness,364,420,56,4,5,gradual,4→5
+1991_MendozaCow,,615916_TET.mat,Loving Kindness,364,420,56,2,5,gradual,2→5
+1991_MendozaCow,,622378_TET.mat,Loving Kindness,84,196,112,2,5,gradual,2→5
+1991_MendozaCow,,630292_TET.mat,Loving Kindness,168,280,112,5,1,gradual,5→1
+1991_MendozaCow,,630292_TET.mat,Loving Kindness,364,420,56,1,5,gradual,1→5
+1991_MendozaCow,,642829_TET.mat,Open Monitoring,364,420,56,1,5,gradual,1→5
+1991_MendozaCow,,656796_TET.mat,Loving Kindness,196,420,224,5,4,gradual,5→4
+1991_MendozaCow,,660627_TET.mat,Loving Kindness,84,196,112,5,1,gradual,5→1
+1991_MendozaCow,,660627_TET.mat,Loving Kindness,364,420,56,1,5,gradual,1→5
+1991_MendozaCow,,665006_TET.mat,Breath,56,168,112,2,5,gradual,2→5
+1991_MendozaCow,,665125_TET.mat,Breath,84,392,308,2,5,gradual,2→5
+1991_MendozaCow,,672276_TET.mat,Breath,112,364,252,5,1,gradual,5→1
+1991_MendozaCow,,677032_TET.mat,Loving Kindness,140,280,140,5,1,gradual,5→1
+1991_MendozaCow,,677032_TET.mat,Loving Kindness,364,420,56,1,5,gradual,1→5
+1991_MendozaCow,,688213_TET.mat,Loving Kindness,56,196,140,5,4,gradual,5→4
+1991_MendozaCow,,688213_TET.mat,Loving Kindness,364,420,56,4,5,gradual,4→5
+1991_MendozaCow,,690264_TET.mat,Loving Kindness,196,280,84,2,5,gradual,2→5
+1991_MendozaCow,,690264_TET.mat,Loving Kindness,280,336,56,5,2,gradual,5→2
+1991_MendozaCow,,690264_TET.mat,Loving Kindness,364,420,56,2,5,gradual,2→5
+1991_MendozaCow,,695596_TET.mat,Loving Kindness,84,196,112,5,1,gradual,5→1
+1991_MendozaCow,,695596_TET.mat,Loving Kindness,364,420,56,1,5,gradual,1→5
+1991_MendozaCow,,703636_TET.mat,Breath,28,168,140,5,2,gradual,5→2
+1991_MendozaCow,,703636_TET.mat,Breath,224,280,56,2,5,gradual,2→5
+1991_MendozaCow,,709056_TET.mat,Loving Kindness,28,196,168,5,4,gradual,5→4
+1991_MendozaCow,,709056_TET.mat,Loving Kindness,364,420,56,4,5,gradual,4→5
+2222_JiutaiChicken,,745847_TET.mat,Breath,364,420,56,2,5,gradual,2→5
+2222_JiutaiChicken,,784116_TET.mat,Breath,336,420,84,1,5,gradual,1→5
+2222_JiutaiChicken,,787389_TET.mat,Breath,56,224,168,5,4,gradual,5→4
+2222_JiutaiChicken,,787389_TET.mat,Breath,364,420,56,4,5,gradual,4→5
+2222_JiutaiChicken,,799543_TET.mat,Breath,112,168,56,2,5,gradual,2→5
+2222_JiutaiChicken,,799543_TET.mat,Breath,280,336,56,5,2,gradual,5→2
+2222_JiutaiChicken,,835788_TET.mat,Breath,336,392,56,2,5,gradual,2→5
+2222_JiutaiChicken,,842460_TET.mat,Breath,196,420,224,2,5,gradual,2→5
+2222_JiutaiChicken,,842460_TET.mat,Breath,224,420,196,5,2,gradual,5→2
+2222_JiutaiChicken,,851738_TET.mat,Breath,168,336,168,2,5,gradual,2→5
+2222_JiutaiChicken,,851738_TET.mat,Breath,224,336,112,5,1,gradual,5→1
+2222_JiutaiChicken,,851738_TET.mat,Breath,364,420,56,1,5,gradual,1→5
+2743_HuaianKoi,,580016_TET.mat,Breath,56,140,84,3,5,gradual,3→5
+2743_HuaianKoi,,580016_TET.mat,Breath,168,252,84,5,1,gradual,5→1
+2743_HuaianKoi,,580785_TET.mat,Breath,84,252,168,2,5,gradual,2→5
+2743_HuaianKoi,,580785_TET.mat,Breath,112,252,140,5,1,gradual,5→1
+2743_HuaianKoi,,580785_TET.mat,Breath,364,420,56,1,5,gradual,1→5
+2743_HuaianKoi,,582881_TET.mat,Breath,84,196,112,2,5,gradual,2→5
+2743_HuaianKoi,,587419_TET.mat,Breath,84,224,140,2,5,gradual,2→5
+2743_HuaianKoi,,587419_TET.mat,Breath,224,364,140,5,1,gradual,5→1
+2743_HuaianKoi,,589853_TET.mat,Breath,56,420,364,2,5,gradual,2→5
+2743_HuaianKoi,,592271_TET.mat,Breath,84,196,112,2,5,gradual,2→5
+2743_HuaianKoi,,592271_TET.mat,Breath,224,308,84,5,1,gradual,5→1
+2743_HuaianKoi,,593275_TET.mat,Breath,112,280,168,2,5,gradual,2→5
+2743_HuaianKoi,,593275_TET.mat,Breath,196,308,112,5,1,gradual,5→1
+2743_HuaianKoi,,616850_TET.mat,Loving Kindness,84,308,224,5,1,gradual,5→1
+2743_HuaianKoi,,623173_TET.mat,Loving Kindness,140,420,280,2,5,gradual,2→5
+2743_HuaianKoi,,623173_TET.mat,Loving Kindness,280,420,140,5,4,gradual,5→4
+2743_HuaianKoi,,626176_TET.mat,Loving Kindness,196,308,112,5,4,gradual,5→4
+2743_HuaianKoi,,626176_TET.mat,Loving Kindness,364,420,56,4,5,gradual,4→5
+2743_HuaianKoi,,629599_TET.mat,Loving Kindness,224,420,196,5,1,gradual,5→1
+2743_HuaianKoi,,633517_TET.mat,Loving Kindness,84,196,112,2,5,gradual,2→5
+2743_HuaianKoi,,635574_TET.mat,Loving Kindness,112,252,140,2,5,gradual,2→5
+2743_HuaianKoi,,643989_TET.mat,Open Monitoring,308,364,56,5,1,gradual,5→1
+2743_HuaianKoi,,645789_TET.mat,Open Monitoring,280,392,112,5,1,gradual,5→1
+2743_HuaianKoi,,648955_TET.mat,Open Monitoring,112,224,112,2,5,gradual,2→5
+2743_HuaianKoi,,649894_TET.mat,Open Monitoring,224,392,168,2,5,gradual,2→5
+2743_HuaianKoi,,650967_TET.mat,Open Monitoring,168,336,168,2,5,gradual,2→5
+2743_HuaianKoi,,650967_TET.mat,Open Monitoring,224,364,140,5,1,gradual,5→1
+2743_HuaianKoi,,652015_TET.mat,Open Monitoring,140,308,168,5,1,gradual,5→1
+2743_HuaianKoi,,652964_TET.mat,Open Monitoring,56,168,112,5,1,gradual,5→1
+2743_HuaianKoi,,654524_TET.mat,Open Monitoring,224,364,140,5,1,gradual,5→1
+2743_HuaianKoi,,657871_TET.mat,Open Monitoring,56,168,112,2,5,gradual,2→5
+2743_HuaianKoi,,657871_TET.mat,Open Monitoring,336,420,84,5,1,gradual,5→1
+2743_HuaianKoi,,659539_TET.mat,Open Monitoring,224,420,196,2,5,gradual,2→5
+3604_LichuanHookworm,,835954_TET.mat,Open Monitoring,336,420,84,3,5,gradual,3→5
+3604_LichuanHookworm,,836141_TET.mat,Loving Kindness,28,168,140,5,4,gradual,5→4
+3604_LichuanHookworm,,836141_TET.mat,Loving Kindness,280,420,140,4,5,gradual,4→5
+3604_LichuanHookworm,,836410_TET.mat,Open Monitoring,308,420,112,1,5,gradual,1→5
+3604_LichuanHookworm,,880945_TET.mat,Open Monitoring,364,420,56,3,5,gradual,3→5
+3604_LichuanHookworm,,880958_TET.mat,Breath,56,140,84,1,5,gradual,1→5
+3604_LichuanHookworm,,880972_TET.mat,Loving Kindness,364,420,56,1,5,gradual,1→5
+3604_ShangquiHare,,901052_TET.mat,Breath,84,224,140,5,2,gradual,5→2
+3604_ShangquiHare,,901129_TET.mat,Loving Kindness,364,420,56,4,5,gradual,4→5
+3604_ShangquiHare,,901162_TET.mat,Breath,28,168,140,5,2,gradual,5→2
+3604_ShangquiHare,,901162_TET.mat,Breath,168,280,112,5,2,gradual,5→2
+3604_ShangquiHare,,901180_TET.mat,Open Monitoring,56,280,224,5,2,gradual,5→2
+3604_ShangquiHare,,901180_TET.mat,Open Monitoring,168,280,112,5,2,gradual,5→2
+3604_ShangquiHare,,902500_TET.mat,Loving Kindness,308,420,112,5,4,gradual,5→4
+3604_ShangquiHare,,902540_TET.mat,Loving Kindness,364,420,56,3,5,gradual,3→5
+3604_ShangquiHare,,902570_TET.mat,Loving Kindness,364,420,56,4,5,gradual,4→5
+3604_ShangquiHare,,902857_TET.mat,Open Monitoring,364,420,56,3,5,abrupt,3→5
+3604_ShangquiHare,,902916_TET.mat,Breath,336,420,84,4,5,gradual,4→5
+3604_ShangquiHare,,904562_TET.mat,Open Monitoring,224,308,84,3,5,gradual,3→5
+3604_ShangquiHare,,904562_TET.mat,Open Monitoring,252,392,140,5,2,gradual,5→2
+3604_ShangquiHare,,904621_TET.mat,Open Monitoring,112,252,140,5,3,gradual,5→3
+3604_ShangquiHare,,904621_TET.mat,Open Monitoring,364,420,56,3,5,gradual,3→5
+3604_ShangquiHare,,904781_TET.mat,Breath,112,420,308,5,4,gradual,5→4
+3604_ShangquiHare,,904818-2_TET.mat,Loving Kindness,364,420,56,4,5,gradual,4→5
+3614_BrisbaneHornet,,832880_TET.mat,Breath,224,280,56,1,5,gradual,1→5
+3614_BrisbaneHornet,,832904_TET.mat,Breath,168,280,112,5,1,gradual,5→1
+3614_BrisbaneHornet,,834142_TET.mat,Loving Kindness,252,308,56,1,5,gradual,1→5
+3614_BrisbaneHornet,,834238_TET.mat,Loving Kindness,28,112,84,5,1,gradual,5→1
+3614_BrisbaneHornet,,834347_TET.mat,Loving Kindness,56,196,140,5,1,gradual,5→1
+3614_BrisbaneHornet,,836248_TET.mat,Breath,56,112,56,5,1,gradual,5→1
+3614_BrisbaneHornet,,836248_TET.mat,Breath,364,420,56,1,5,gradual,1→5
+3614_VientianeWhippet,,901064_TET.mat,Breath,336,420,84,2,5,gradual,2→5
+3614_VientianeWhippet,,901098_TET.mat,Breath,224,420,196,4,5,gradual,4→5
+3614_VientianeWhippet,,901155_TET.mat,Loving Kindness,336,392,56,4,5,gradual,4→5
+3614_VientianeWhippet,,901238_TET.mat,Loving Kindness,112,252,140,4,5,gradual,4→5
+3614_VientianeWhippet,,902544-2_TET.mat,Loving Kindness,308,420,112,4,5,gradual,4→5
+3614_VientianeWhippet,,902905_TET.mat,Loving Kindness,112,252,140,4,5,gradual,4→5
+3614_VientianeWhippet,,904380_TET.mat,Breath,112,252,140,5,2,gradual,5→2
+3614_VientianeWhippet,,904380_TET.mat,Breath,336,420,84,2,5,gradual,2→5
+3614_VientianeWhippet,,905075_TET.mat,Loving Kindness,364,420,56,4,5,gradual,4→5
+3938_YingchengSeaLion,,1278618_TET.mat,Open Monitoring,280,420,140,3,5,gradual,3→5
+3938_YingchengSeaLion,,1278618_TET.mat,Open Monitoring,308,420,112,5,4,gradual,5→4
+3938_YingchengSeaLion,,836412_TET.mat,Open Monitoring,364,420,56,3,5,gradual,3→5
+4765_NouakchottMoose,,901120_TET.mat,Loving Kindness,140,364,224,4,5,gradual,4→5
+4765_NouakchottMoose,,901120_TET.mat,Loving Kindness,168,364,196,5,4,gradual,5→4
+4765_NouakchottMoose,,901154_TET.mat,Loving Kindness,364,420,56,4,5,gradual,4→5
+4765_NouakchottMoose,,902541-1_TET.mat,Loving Kindness,140,280,140,4,5,gradual,4→5
+4765_NouakchottMoose,,902541-1_TET.mat,Loving Kindness,168,280,112,5,4,gradual,5→4
+4765_NouakchottMoose,,902571_TET.mat,Loving Kindness,56,112,56,4,5,gradual,4→5
+4765_NouakchottMoose,,904572_TET.mat,Open Monitoring,224,420,196,5,2,gradual,5→2
+4765_NouakchottMoose,,904630-1_TET.mat,Open Monitoring,140,308,168,5,3,gradual,5→3
+4765_NouakchottMoose,,904630-2_TET.mat,Open Monitoring,84,252,168,3,5,gradual,3→5
+4765_NouakchottMoose,,904630-2_TET.mat,Open Monitoring,112,252,140,5,3,gradual,5→3
+4765_NouakchottMoose,,904787_TET.mat,Breath,56,224,168,5,2,gradual,5→2
+4765_NouakchottMoose,,904787_TET.mat,Breath,252,308,56,2,5,gradual,2→5
+4765_NouakchottMoose,,904787_TET.mat,Breath,364,420,56,2,5,gradual,2→5
+5644_AkesuCoral,,832886_TET.mat,Breath,112,224,112,1,5,gradual,1→5
+5644_AkesuCoral,,832886_TET.mat,Breath,224,308,84,5,1,gradual,5→1
+5644_AkesuCoral,,834380_TET.mat,Loving Kindness,196,364,168,3,5,gradual,3→5
+5644_AkesuCoral,,834380_TET.mat,Loving Kindness,224,392,168,5,3,gradual,5→3
+5644_AkesuCoral,,834426_TET.mat,Loving Kindness,56,224,168,5,4,gradual,5→4
+5644_AkesuCoral,,834591_TET.mat,Open Monitoring,168,280,112,5,3,gradual,5→3
+5644_AkesuCoral,,834612_TET.mat,Open Monitoring,168,252,84,2,5,gradual,2→5
+5644_AkesuCoral,,834612_TET.mat,Open Monitoring,196,336,140,5,3,gradual,5→3
+5644_AkesuCoral,,834622_TET.mat,Breath,168,420,252,3,5,gradual,3→5
+5644_AkesuCoral,,834626_TET.mat,Breath,364,420,56,2,5,gradual,2→5
+5644_AkesuCoral,,834640_TET.mat,Loving Kindness,140,252,112,5,4,gradual,5→4
+5644_AkesuCoral,,835792_TET.mat,Open Monitoring,84,252,168,5,3,gradual,5→3
+5644_AkesuCoral,,840400_TET.mat,Open Monitoring,336,420,84,3,5,gradual,3→5
+5892_LvivRooster,,834240_TET.mat,Loving Kindness,364,420,56,4,5,gradual,4→5
+5892_LvivRooster,,834381_TET.mat,Loving Kindness,56,196,140,5,3,gradual,5→3
+5892_LvivRooster,,834381_TET.mat,Loving Kindness,140,252,112,5,2,gradual,5→2
+5892_LvivRooster,,845997_TET.mat,Open Monitoring,364,420,56,3,5,gradual,3→5
+5892_LvivRooster,,846013_TET.mat,Breath,28,196,168,5,3,gradual,5→3
+5892_LvivRooster,,846014_TET.mat,Open Monitoring,168,308,140,3,5,gradual,3→5
+5892_NonthaburiHalibut,,901037_TET.mat,Breath,140,308,168,2,5,gradual,2→5
+5892_NonthaburiHalibut,,901063_TET.mat,Breath,112,224,112,4,5,gradual,4→5
+5892_NonthaburiHalibut,,901063_TET.mat,Breath,252,364,112,5,4,gradual,5→4
+5892_NonthaburiHalibut,,901101_TET.mat,Breath,112,168,56,5,4,gradual,5→4
+5892_NonthaburiHalibut,,901156_TET.mat,Loving Kindness,196,336,140,2,5,gradual,2→5
+5892_NonthaburiHalibut,,901200_TET.mat,Open Monitoring,252,392,140,3,5,gradual,3→5
+5892_NonthaburiHalibut,,902904_TET.mat,Loving Kindness,336,420,84,4,5,gradual,4→5
+5892_NonthaburiHalibut,,904603_TET.mat,Open Monitoring,364,420,56,3,5,gradual,3→5
+5892_NonthaburiHalibut,,904736_TET.mat,Breath,196,336,140,4,5,gradual,4→5
+5892_NonthaburiHalibut,,904736_TET.mat,Breath,224,364,140,5,1,gradual,5→1
+7135_TampicoWallaby,,901009_TET.mat,Breath,112,224,112,4,5,gradual,4→5
+7135_TampicoWallaby,,901099_TET.mat,Breath,84,196,112,5,2,gradual,5→2
+7135_TampicoWallaby,,901099_TET.mat,Breath,224,308,84,2,5,gradual,2→5
+7135_TampicoWallaby,,901169_TET.mat,Breath,112,224,112,5,2,gradual,5→2
+7135_TampicoWallaby,,902842_TET.mat,Open Monitoring,112,168,56,5,4,gradual,5→4
+7135_TampicoWallaby,,902878_TET.mat,Open Monitoring,112,224,112,5,2,gradual,5→2
+7135_TampicoWallaby,,902878_TET.mat,Open Monitoring,364,420,56,2,5,gradual,2→5
+7135_TampicoWallaby,,904607_TET.mat,Open Monitoring,112,168,56,5,2,gradual,5→2
+7135_TampicoWallaby,,904622_TET.mat,Open Monitoring,364,420,56,2,5,gradual,2→5
+8681_NanchangAlbatross,,902443_TET.mat,Breath,364,420,56,2,5,gradual,2→5
+8681_NanchangAlbatross,,902813_TET.mat,Loving Kindness,56,196,140,5,4,gradual,5→4
+8681_NanchangAlbatross,,902814_TET.mat,Loving Kindness,168,308,140,3,5,gradual,3→5
+8681_NanchangAlbatross,,902915_TET.mat,Open Monitoring,140,280,140,5,4,gradual,5→4
+8681_NanchangAlbatross,,904648_TET.mat,Open Monitoring,336,420,84,3,5,gradual,3→5
+8681_NanchangAlbatross,,906999_TET.mat,Breath,168,308,140,3,5,gradual,3→5
+8725_ShishouMosquito,,901263_TET.mat,Loving Kindness,140,280,140,2,5,gradual,2→5
+8725_ShishouMosquito,,901263_TET.mat,Loving Kindness,168,308,140,5,4,gradual,5→4
+8725_ShishouMosquito,,901276_TET.mat,Breath,364,420,56,4,5,gradual,4→5
+8725_ShishouMosquito,,902671_TET.mat,Loving Kindness,84,224,140,5,4,gradual,5→4
+8725_ShishouMosquito,,902943_TET.mat,Loving Kindness,364,420,56,2,5,gradual,2→5
+8725_ShishouMosquito,,904624_TET.mat,Open Monitoring,364,420,56,4,5,gradual,4→5
+8725_ShishouMosquito,,904807_TET.mat,Breath,28,224,196,5,4,gradual,5→4
+8725_YangchunCobra,,832981_TET.mat,Breath,112,252,140,3,2,gradual,3→2
+8725_YangchunCobra,,834176_TET.mat,Loving Kindness,168,336,168,5,4,gradual,5→4
+8725_YangchunCobra,,834239_TET.mat,Loving Kindness,224,392,168,4,5,gradual,4→5
+8725_YangchunCobra,,834608_TET.mat,Open Monitoring,224,364,140,5,3,gradual,5→3
+8725_YangchunCobra,,834636_TET.mat,Loving Kindness,56,168,112,5,4,gradual,5→4
+8725_YangchunCobra,,836167_TET.mat,Breath,140,224,84,5,3,gradual,5→3
+8725_YangchunCobra,,836167_TET.mat,Breath,336,420,84,3,5,gradual,3→5
+8725_YangchunCobra,,839339_TET.mat,Breath,112,364,252,1,5,gradual,1→5
+8725_YangchunCobra,,839576_TET.mat,Breath,196,336,140,5,3,gradual,5→3
+8725_YangchunCobra,,839576_TET.mat,Breath,364,420,56,3,5,gradual,3→5

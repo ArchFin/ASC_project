@@ -4,7 +4,7 @@ import seaborn as sns
 import numpy as np
 
 # Define the file path
-file_path = "/Users/a_fin/Desktop/Year 4/Project/Transition analysis/transitions_summary.csv"
+file_path = "/Users/a_fin/Desktop/Year 4/Project/Data/transitions_summary.csv"
 
 # Read the CSV file
 df = pd.read_csv(file_path)
