@@ -1,0 +1,77 @@
+{
+  "model_type": "bidirectional (Two-Stage Selection - Publication Version)",
+  "selected_model": "bidirectional",
+  "model_selection_results": {
+    "bidirectional": 0.5156036532269683
+  },
+  "overall_auc_mean": 0.5607090331484279,
+  "overall_auc_std": 0.09612617345485709,
+  "auc_confidence_interval": [
+    0.5000426721341722,
+    0.6213753941626836
+  ],
+  "p_value_vs_chance": 0.049883265129309275,
+  "t_statistic": 2.448632983024451,
+  "per_class_auc_mean": {
+    "1": 0.5656175924500173,
+    "2": 0.5601821752518291,
+    "3": 0.5563273317434374
+  },
+  "per_class_auc_std": {
+    "1": 0.10183603730422575,
+    "2": 0.06686658080612165,
+    "3": 0.11967590225422389
+  },
+  "balanced_accuracy_mean": 0.36671724450715126,
+  "balanced_accuracy_std": 0.07258597674152144,
+  "f1_macro_mean": 0.3378605302429761,
+  "f1_macro_std": 0.09085250392069288,
+  "f1_weighted_mean": 0.40811372691969067,
+  "f1_weighted_std": 0.09858047134060594,
+  "confusion_matrix_percent": [
+    [
+      36.78720445062587,
+      27.329624478442284,
+      35.88317107093185
+    ],
+    [
+      16.0267699894329,
+      57.76681930257133,
+      26.206410707995776
+    ],
+    [
+      18.163054695562437,
+      39.35328517371861,
+      42.48366013071895
+    ]
+  ],
+  "confusion_matrix_counts": [
+    [
+      529,
+      393,
+      516
+    ],
+    [
+      455,
+      1640,
+      744
+    ],
+    [
+      528,
+      1144,
+      1235
+    ]
+  ],
+  "total_folds_successful": 7,
+  "total_folds_attempted": 7,
+  "failed_folds": [],
+  "sequence_length": 25,
+  "overlap": 0.8,
+  "enhanced_features": 21,
+  "feature_count": 21,
+  "subjects_tested": 7,
+  "excluded_subjects": [],
+  "publication_ready": true,
+  "temporal_aware": true,
+  "methodology": "Two-stage with temporal_aware cross-validation: (1) Model selection across all folds, (2) Unbiased evaluation with selected model"
+}

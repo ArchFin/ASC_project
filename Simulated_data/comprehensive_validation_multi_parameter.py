@@ -413,12 +413,12 @@ def main():
         config = yaml.safe_load(file)
     
     # Define parameter ranges (reduced for computational feasibility)
-    smoothness_values = [0, 1, 2, 3, 4, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60]
-    gamma_thresholds = [0.01, 0.03, 0.05, 0.1, 0.2, 0.3, 0.5]  # Key values
-    min_nu_values = [3, 6, 9, 12, 15, 20, 25]  # Key values
-    tc_values = [2, 4, 6, 8, 10, 12, 15, 18]  # Key values
-    n_primary_states_to_test = 2  # 2 primary states + 1 transition state = 3 total states
-    
+    smoothness_values = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]  # Key values
+    gamma_thresholds = [0.01, 0.03, 0.05, 0.1, 0.2, 0.3, 0.5, 0.7, 0.9]  # Key values
+    min_nu_values = [3, 6, 9, 12, 15, 20, 25, 30]  # Key values
+    tc_values = [2, 4, 6, 8, 10, 12, 15, 18, 20, 25]  # Key values
+    n_primary_states_to_test = 2
+
     print(f"Testing {len(smoothness_values)} smoothness values: {smoothness_values}")
     print(f"Testing {len(gamma_thresholds)} gamma thresholds: {gamma_thresholds}")
     print(f"Testing {len(min_nu_values)} min_nu values: {min_nu_values}")
@@ -549,33 +549,38 @@ def main():
     # Save full results
     results_csv_path = os.path.join(config['savelocation_TET'], 
                                    f'comprehensive_multi_parameter_validation_data_{n_primary_states_to_test}states.csv')
+    if os.path.exists(results_csv_path):
+        existing_results = pd.read_csv(results_csv_path)
+        results_df = pd.concat([existing_results, results_df], ignore_index=True)
     results_df.to_csv(results_csv_path, index=False)
     print(f"Full results data saved to: {results_csv_path}")
     
     # Save optimal parameters lookup table
-    if not optimal_params.empty:
-        optimal_csv_path = os.path.join(config['savelocation_TET'], 
-                                       f'optimal_parameters_lookup_{n_primary_states_to_test}states.csv')
-        optimal_params.to_csv(optimal_csv_path, index=False)
-        print(f"Optimal parameters lookup table saved to: {optimal_csv_path}")
-        
-        # Create a simplified lookup function format
-        lookup_dict = {}
-        for _, row in optimal_params.iterrows():
-            lookup_dict[row['smoothness']] = {
-                'gamma_threshold': row['Optimal_Gamma'],
-                'min_nu': int(row['Optimal_Min_Nu']),
-                'transition_contribution': int(row['Optimal_TC']),
-                'expected_accuracy': row['Max_Accuracy']
-            }
-        
-        # Save as JSON for easy programmatic access
-        import json
-        json_path = os.path.join(config['savelocation_TET'], 
-                                f'optimal_parameters_lookup_{n_primary_states_to_test}states.json')
-        with open(json_path, 'w') as f:
-            json.dump(lookup_dict, f, indent=2)
-        print(f"Optimal parameters JSON lookup saved to: {json_path}")
+    optimal_csv_path = os.path.join(config['savelocation_TET'], 
+                                    f'optimal_parameters_lookup_{n_primary_states_to_test}states.csv')
+    if os.path.exists(optimal_csv_path):
+        existing_optimal_params = pd.read_csv(optimal_csv_path)
+        optimal_params = pd.concat([existing_optimal_params, optimal_params], ignore_index=True)
+    optimal_params.to_csv(optimal_csv_path, index=False)
+    print(f"Optimal parameters lookup table saved to: {optimal_csv_path}")
+    
+    # Create a simplified lookup function format
+    lookup_dict = {}
+    for _, row in optimal_params.iterrows():
+        lookup_dict[row['smoothness']] = {
+            'gamma_threshold': row['Optimal_Gamma'],
+            'min_nu': int(row['Optimal_Min_Nu']),
+            'transition_contribution': int(row['Optimal_TC']),
+            'expected_accuracy': row['Max_Accuracy']
+        }
+    
+    # Save as JSON for easy programmatic access
+    import json
+    json_path = os.path.join(config['savelocation_TET'], 
+                            f'optimal_parameters_lookup_{n_primary_states_to_test}states.json')
+    with open(json_path, 'w') as f:
+        json.dump(lookup_dict, f, indent=2)
+    print(f"Optimal parameters JSON lookup saved to: {json_path}")
     
     # Clean up temporary files
     import shutil

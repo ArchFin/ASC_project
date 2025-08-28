@@ -464,7 +464,7 @@ def main():
     print(f"Loaded optimal parameters for {len(optimal_params_df)} smoothness levels")
     
     # Define test smoothness values (subset of original range for faster validation)
-    test_smoothness_values = [0, 1, 5, 10, 20, 30, 50]
+    test_smoothness_values = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 18, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75]
     
     print(f"Testing hyperparameter optimization on {len(test_smoothness_values)} smoothness levels:")
     print(f"Test smoothness values: {test_smoothness_values}")

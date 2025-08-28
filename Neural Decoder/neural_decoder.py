@@ -2,7 +2,7 @@
 """
 neural_decoder.py
 
-Standalone script for multi-state neural decoding using Keras.
+Standalone script for multi-state neural decoding using RNN-based Keras models.
 
 Usage:
     python neural_decoder.py --input_csv path/to/data.csv --drop_cols Subject Week Session Condition Cluster
@@ -10,9 +10,17 @@ Usage:
 This script:
   1. Loads and filters your data
   2. Cleans, imputes, and scales features
-  3. Encodes labels for multi-class classification
-  4. Builds and trains a feed-forward neural network (MLPC)
-  5. Outputs performance metrics and saves model + label encoder
+  3. Reshapes data into temporal sequences for RNN input
+  4. Encodes labels for multi-class classification
+  5. Builds and trains RNN models (LSTM/Bidirectional LSTM) optimized for temporal EEG data
+  6. Outputs performance metrics and saves model + label encoder
+
+Key Changes for RNN Implementation:
+  - Added temporal sequence creation with configurable sequence length and overlap
+  - Replaced feedforward networks with LSTM/Bidirectional LSTM architectures
+  - Modified preprocessing pipeline to handle 3D tensor input (samples, timesteps, features)
+  - Enhanced model architectures specifically for breathing pattern classification
+  - Maintained all existing cross-validation and analysis capabilities
 """
 import tensorflow as tf
 print(tf.__version__)  # Verify TensorFlow version
@@ -34,9 +42,9 @@ from sklearn.metrics import roc_auc_score, confusion_matrix
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.utils.class_weight import compute_class_weight
 
-# Keras (via TensorFlow) layers and utilities for building an MLPC
+# Keras (via TensorFlow) layers and utilities for building RNN models
 from keras._tf_keras.keras.models import Sequential
-from keras._tf_keras.keras.layers import Dense, BatchNormalization, Input, Dropout
+from keras._tf_keras.keras.layers import Dense, BatchNormalization, Input, Dropout, LSTM, GRU, Bidirectional, TimeDistributed
 from keras._tf_keras.keras.optimizers import Adam
 from keras._tf_keras.keras.callbacks import EarlyStopping, ReduceLROnPlateau
 from keras._tf_keras.keras.regularizers import l2
@@ -85,6 +93,105 @@ def safe_json_dump(data, file_path, indent=2):
     
     with open(file_path, 'w') as f:
         json.dump(converted_data, f, indent=indent)
+
+
+def reshape_for_rnn(X, sequence_length=10, overlap=0.5):
+    """
+    Reshape feature matrix for RNN input by creating temporal sequences.
+    
+    Args:
+        X: Feature matrix of shape (n_samples, n_features)
+        sequence_length: Number of time steps in each sequence
+        overlap: Overlap between consecutive sequences (0-1)
+    
+    Returns:
+        X_sequences: Reshaped data of shape (n_sequences, sequence_length, n_features)
+        indices: Original indices for each sequence (for tracking)
+    """
+    n_samples, n_features = X.shape
+    step_size = max(1, int(sequence_length * (1 - overlap)))
+    
+    # Calculate number of sequences we can create
+    n_sequences = max(0, (n_samples - sequence_length) // step_size + 1)
+    
+    if n_sequences == 0:
+        print(f"Warning: Cannot create sequences with length {sequence_length} from {n_samples} samples")
+        # Fallback: use the entire dataset as one sequence (pad if necessary)
+        if n_samples < sequence_length:
+            # Pad with last sample repeated
+            padding_needed = sequence_length - n_samples
+            X_padded = np.vstack([X, np.tile(X[-1:], (padding_needed, 1))])
+            X_sequences = X_padded.reshape(1, sequence_length, n_features)
+            indices = np.arange(n_samples).tolist() + [n_samples-1] * padding_needed
+        else:
+            # Take first sequence_length samples
+            X_sequences = X[:sequence_length].reshape(1, sequence_length, n_features)
+            indices = list(range(sequence_length))
+        return X_sequences, [indices]
+    
+    # Create sequences
+    X_sequences = np.zeros((n_sequences, sequence_length, n_features))
+    indices = []
+    
+    for i in range(n_sequences):
+        start_idx = i * step_size
+        end_idx = start_idx + sequence_length
+        X_sequences[i] = X[start_idx:end_idx]
+        indices.append(list(range(start_idx, end_idx)))
+    
+    print(f"Created {n_sequences} sequences of length {sequence_length} from {n_samples} samples")
+    return X_sequences, indices
+
+
+def aggregate_sequence_predictions(predictions, indices, original_length, method='mean'):
+    """
+    Aggregate predictions from overlapping sequences back to original sample predictions.
+    
+    Args:
+        predictions: Predictions for each sequence
+        indices: Original indices for each sequence
+        original_length: Length of original dataset
+        method: Aggregation method ('mean', 'max', 'last')
+    
+    Returns:
+        aggregated_predictions: Predictions for original samples
+    """
+    if len(predictions) == 0:
+        return np.array([])
+    
+    n_classes = predictions.shape[1] if len(predictions.shape) > 1 else 1
+    aggregated = np.zeros((original_length, n_classes))
+    counts = np.zeros(original_length)
+    
+    for seq_pred, seq_indices in zip(predictions, indices):
+        for i, orig_idx in enumerate(seq_indices):
+            if orig_idx < original_length:
+                if method == 'mean':
+                    aggregated[orig_idx] += seq_pred
+                    counts[orig_idx] += 1
+                elif method == 'max':
+                    if counts[orig_idx] == 0 or np.max(seq_pred) > np.max(aggregated[orig_idx]):
+                        aggregated[orig_idx] = seq_pred
+                        counts[orig_idx] = 1
+                elif method == 'last':
+                    aggregated[orig_idx] = seq_pred
+                    counts[orig_idx] = 1
+    
+    # Handle averaging for mean method
+    if method == 'mean':
+        for i in range(original_length):
+            if counts[i] > 0:
+                aggregated[i] /= counts[i]
+    
+    # Handle samples that weren't covered by any sequence
+    uncovered = counts == 0
+    if np.any(uncovered):
+        print(f"Warning: {np.sum(uncovered)} samples not covered by any sequence")
+        # Use uniform prediction for uncovered samples
+        uniform_pred = np.ones(n_classes) / n_classes
+        aggregated[uncovered] = uniform_pred
+    
+    return aggregated
 
 
 def select_important_features(X_train, y_train, X_test, n_features=None):
@@ -193,9 +300,9 @@ def clean_impute(X, mu=None, sigma=None, threshold=2.5):
     return X, mu, sigma
 
 
-def preprocess(X_train, X_test, y_train, y_test, random_state=42):
+def preprocess(X_train, X_test, y_train, y_test, random_state=42, sequence_length=10):
     """
-    Enhanced preprocessing with feature engineering and class balancing.
+    Enhanced preprocessing with feature engineering and class balancing for RNN models.
     1. Clean and impute X_train and X_test separately.
     2. Add feature engineering (interaction terms, polynomial features).
     3. Align y to the cleaned X indices.
@@ -203,8 +310,9 @@ def preprocess(X_train, X_test, y_train, y_test, random_state=42):
     5. Shuffle training data.
     6. Robust standardization with outlier handling.
     7. Label-encode y: fit on y_train, transform both y_train and y_test.
-    8. Convert y to one-hot vectors.
-    Returns: X_train_scaled, X_test_scaled, Y_train_onehot, Y_test_onehot, label_encoder, classes.
+    8. Reshape data for RNN input (sequence_length, n_features).
+    9. Convert y to one-hot vectors.
+    Returns: X_train_sequences, X_test_sequences, Y_train_onehot, Y_test_onehot, label_encoder, classes.
     """
     from sklearn.preprocessing import RobustScaler
     from imblearn.over_sampling import SMOTE
@@ -218,7 +326,7 @@ def preprocess(X_train, X_test, y_train, y_test, random_state=42):
     X_test_clean, _, _ = clean_impute(X_test, mu=mu, sigma=sigma)
     if X_test_clean.empty:
         print("Warning: Test set became empty after cleaning. Skipping this fold.")
-        return None, None, None, None, None, None
+        return None, None, None, None, None, None, None
 
     y_test_clean = y_test.loc[X_test_clean.index]
 
@@ -248,22 +356,73 @@ def preprocess(X_train, X_test, y_train, y_test, random_state=42):
     print(f"Original class distribution: {np.bincount(y_train_enc)}")
     X_train_balanced, y_train_balanced = X_train_selected, y_train_enc
 
+    # ===== RESHAPE DATA FOR RNN INPUT =====
+    print(f"\n===== RESHAPING DATA FOR RNN =====")
+    print(f"Creating temporal sequences with length {sequence_length}")
+    
+    # Reshape training data
+    X_train_sequences, train_indices = reshape_for_rnn(
+        X_train_balanced, 
+        sequence_length=sequence_length, 
+        overlap=0.5
+    )
+    
+    # Adjust labels to match sequences
+    # For overlapping sequences, we'll use the label of the last sample in each sequence
+    y_train_sequences = []
+    for seq_indices in train_indices:
+        if isinstance(seq_indices, list):
+            last_idx = seq_indices[-1]
+        else:
+            last_idx = seq_indices
+        # Make sure we don't go out of bounds
+        label_idx = min(last_idx, len(y_train_balanced) - 1)
+        y_train_sequences.append(y_train_balanced[label_idx])
+    
+    y_train_sequences = np.array(y_train_sequences)
+    
+    # Reshape test data
+    X_test_sequences, test_indices = reshape_for_rnn(
+        X_test_selected, 
+        sequence_length=sequence_length, 
+        overlap=0.5
+    )
+    
+    # Adjust test labels to match sequences
+    y_test_sequences = []
+    for seq_indices in test_indices:
+        if isinstance(seq_indices, list):
+            last_idx = seq_indices[-1]
+        else:
+            last_idx = seq_indices
+        # Make sure we don't go out of bounds
+        label_idx = min(last_idx, len(y_test_enc) - 1)
+        y_test_sequences.append(y_test_enc[label_idx])
+    
+    y_test_sequences = np.array(y_test_sequences)
+    
+    print(f"Train sequences shape: {X_train_sequences.shape}")
+    print(f"Test sequences shape: {X_test_sequences.shape}")
+    print(f"Train labels shape: {y_train_sequences.shape}")
+    print(f"Test labels shape: {y_test_sequences.shape}")
+
     # Convert to one-hot vectors
-    Y_train_onehot = to_categorical(y_train_balanced)
-    Y_test_onehot = to_categorical(y_test_enc, num_classes=len(le.classes_))
+    Y_train_onehot = to_categorical(y_train_sequences)
+    Y_test_onehot = to_categorical(y_test_sequences, num_classes=len(le.classes_))
 
     # Return all processed sets and the fitted encoder
-    return X_train_balanced, X_test_selected, Y_train_onehot, Y_test_onehot, le, le.classes_, selected_features
+    return X_train_sequences, X_test_sequences, Y_train_onehot, Y_test_onehot, le, le.classes_, selected_features
 
 
-def build_simple_baseline_model(input_dim, num_classes):
+def build_simple_baseline_model(input_shape, num_classes):
     """
-    Extremely simple baseline model for comparison.
-    Just one hidden layer with heavy regularization.
+    Simple RNN baseline model for temporal EEG data.
+    Single LSTM layer with heavy regularization.
     """
     model = Sequential([
-        Input(shape=(input_dim,)),
-        Dense(32, activation='relu', kernel_regularizer=l2(0.1)),
+        Input(shape=input_shape),
+        LSTM(32, return_sequences=False, dropout=0.5, recurrent_dropout=0.3),
+        Dense(16, activation='relu', kernel_regularizer=l2(0.1)),
         Dropout(0.7),
         Dense(num_classes, activation='softmax', kernel_regularizer=l2(0.1))
     ])
@@ -277,30 +436,27 @@ def build_simple_baseline_model(input_dim, num_classes):
     return model
 
 
-def build_breathing_optimized_model(input_dim, num_classes, dropout_rate=0.4):
+def build_breathing_optimized_model(input_shape, num_classes, dropout_rate=0.4):
     """
-    Build a neural network optimized specifically for breathing pattern classification.
-    Uses breathing-specific architecture with attention-like mechanisms.
+    Build a bidirectional RNN optimized specifically for breathing pattern classification.
+    Uses bidirectional LSTM to capture both forward and backward temporal dependencies
+    in breathing-related neural dynamics.
     """
     model = Sequential([
-        Input(shape=(input_dim,)),
+        Input(shape=input_shape),
         
-        # First pathway: Focus on frequency domain features
-        Dense(128, activation='relu', kernel_regularizer=l2(0.01), name='freq_pathway'),
-        Dropout(dropout_rate),
+        # First bidirectional LSTM layer to capture temporal patterns
+        Bidirectional(LSTM(64, return_sequences=True, dropout=dropout_rate, recurrent_dropout=0.3)),
         BatchNormalization(),
         
-        # Second pathway: Focus on complexity features  
-        Dense(64, activation='relu', kernel_regularizer=l2(0.01), name='complexity_pathway'),
-        Dropout(dropout_rate),
+        # Second LSTM layer for higher-level temporal abstraction
+        LSTM(32, return_sequences=False, dropout=dropout_rate, recurrent_dropout=0.3),
         BatchNormalization(),
         
-        # Attention-like mechanism
-        Dense(32, activation='tanh', kernel_regularizer=l2(0.01), name='attention'),
+        # Dense layers for final classification
+        Dense(64, activation='relu', kernel_regularizer=l2(0.01)),
         Dropout(dropout_rate),
-        
-        # Final classification
-        Dense(16, activation='relu', kernel_regularizer=l2(0.01)),
+        Dense(32, activation='relu', kernel_regularizer=l2(0.01)),
         Dropout(dropout_rate),
         Dense(num_classes, activation='softmax', kernel_regularizer=l2(0.02))
     ])
@@ -322,41 +478,76 @@ def build_breathing_optimized_model(input_dim, num_classes, dropout_rate=0.4):
     return model
 
 
-def build_model(input_dim, num_classes, hp=None):
+def build_model(input_shape, num_classes, hp=None):
     """
-    Build a simple, robust neural network optimized for cross-subject generalization.
-    Heavily constrained hyperparameters to prevent overfitting.
+    Build an RNN model optimized for temporal EEG data classification.
+    Uses LSTM layers to capture temporal dependencies in neural patterns.
     """
     if hp:
-        # Severely constrained hyperparameter search for generalization
-        units = hp.Choice('units', [64, 128])  # Much smaller range
-        lr = hp.Choice('lr', [1e-3, 5e-4])     # Fixed good values
-        dropout_rate = hp.Choice('dropout_rate', [0.5, 0.6])  # High dropout for generalization
-        l2_reg = hp.Choice('l2_reg', [0.01, 0.05])  # Strong regularization
+        # Hyperparameter search for RNN architecture
+        lstm_units = hp.Choice('lstm_units', [32, 64, 128])
+        dense_units = hp.Choice('dense_units', [32, 64])
+        lr = hp.Choice('lr', [1e-3, 5e-4, 1e-4])
+        dropout_rate = hp.Choice('dropout_rate', [0.3, 0.4, 0.5])
+        recurrent_dropout = hp.Choice('recurrent_dropout', [0.2, 0.3, 0.4])
+        l2_reg = hp.Choice('l2_reg', [0.01, 0.02, 0.05])
+        use_bidirectional = hp.Boolean('use_bidirectional')
     else:
         # Conservative defaults optimized for generalization
-        units, lr, dropout_rate, l2_reg = 64, 1e-3, 0.5, 0.01
+        lstm_units = 64
+        dense_units = 32
+        lr = 1e-3
+        dropout_rate = 0.4
+        recurrent_dropout = 0.3
+        l2_reg = 0.01
+        use_bidirectional = True
 
-    # Simpler architecture - just 2 hidden layers
-    model = Sequential([
-        Input(shape=(input_dim,)),
-        
-        # First hidden layer with heavy regularization
-        Dense(units, activation='relu', kernel_regularizer=l2(l2_reg)),
-        Dropout(dropout_rate),
-        
-        # Second hidden layer
-        Dense(units // 2, activation='relu', kernel_regularizer=l2(l2_reg)),
-        Dropout(dropout_rate),
-        
-        # Output layer with extra regularization
-        Dense(num_classes, activation='softmax', kernel_regularizer=l2(l2_reg * 2))
-    ])
+    # Build RNN architecture
+    model = Sequential()
+    model.add(Input(shape=input_shape))
+    
+    # First LSTM layer
+    if use_bidirectional:
+        model.add(Bidirectional(LSTM(
+            lstm_units, 
+            return_sequences=True, 
+            dropout=dropout_rate, 
+            recurrent_dropout=recurrent_dropout,
+            kernel_regularizer=l2(l2_reg)
+        )))
+    else:
+        model.add(LSTM(
+            lstm_units, 
+            return_sequences=True, 
+            dropout=dropout_rate, 
+            recurrent_dropout=recurrent_dropout,
+            kernel_regularizer=l2(l2_reg)
+        ))
+    
+    model.add(BatchNormalization())
+    
+    # Second LSTM layer (smaller)
+    model.add(LSTM(
+        lstm_units // 2, 
+        return_sequences=False, 
+        dropout=dropout_rate, 
+        recurrent_dropout=recurrent_dropout,
+        kernel_regularizer=l2(l2_reg)
+    ))
+    
+    model.add(BatchNormalization())
+    
+    # Dense layers for classification
+    model.add(Dense(dense_units, activation='relu', kernel_regularizer=l2(l2_reg)))
+    model.add(Dropout(dropout_rate))
+    
+    # Output layer
+    model.add(Dense(num_classes, activation='softmax', kernel_regularizer=l2(l2_reg * 2)))
     
     # Conservative optimizer settings
     optimizer = Adam(
         learning_rate=lr,
-        clipnorm=0.5,  # Stronger gradient clipping
+        clipnorm=0.5,
         beta_1=0.9,
         beta_2=0.999
     )
@@ -409,7 +600,7 @@ def tune_hyperparameters(X_train, Y_train, X_val, Y_val):
     Focus on generalization over validation performance.
     """
     def model_fn(hp):
-        return build_model(X_train.shape[1], Y_train.shape[1], hp)
+        return build_model(X_train.shape[1:], Y_train.shape[1], hp)
 
     # MUCH more conservative search to prevent overfitting
     tuner = kt.RandomSearch(
@@ -451,7 +642,7 @@ def tune_hyperparameters(X_train, Y_train, X_val, Y_val):
 def train_and_evaluate(X_train, Y_train, X_test, Y_test, label_names,
                        class_weights=None, out_dir='results'):
     """
-    1. Builds an MLPC with default hyperparameters by calling build_model().
+    1. Builds an RNN with default hyperparameters by calling build_model().
     2. Uses EarlyStopping and ReduceLROnPlateau to regularize training.
        - EarlyStopping: stop when validation loss doesn't improve for 3 epochs.
        - ReduceLROnPlateau: reduce learning rate when validation loss plateaus for 2 epochs.
@@ -471,8 +662,9 @@ def train_and_evaluate(X_train, Y_train, X_test, Y_test, label_names,
         y_train_labels = Y_train.argmax(axis=1)
         class_weights = compute_balanced_class_weights(y_train_labels)
 
-    # Build a fresh model
-    model = build_model(X_train.shape[1], Y_train.shape[1])
+    # Build a fresh model - note input_shape for RNN
+    input_shape = (X_train.shape[1], X_train.shape[2])  # (sequence_length, n_features)
+    model = build_model(input_shape, Y_train.shape[1])
 
     # Callbacks for regularization - more aggressive
     callbacks = [
@@ -856,7 +1048,7 @@ def process_single_fold(fold_data):
     print(f"Fold {fold_num} - Testing on subjects: {test_subjects}")
 
     # Preprocess data for the fold
-    result = preprocess(X_train, X_test, y_train, y_test)
+    result = preprocess(X_train, X_test, y_train, y_test, sequence_length=10)
     
     # If preprocessing fails (e.g., empty test set), skip fold
     if result[0] is None:
@@ -885,7 +1077,7 @@ def process_single_fold(fold_data):
     
     # Test both simple baseline, breathing-optimized, and tuned model
     print(f"Fold {fold_num} - Testing simple baseline model...")
-    baseline_model = build_simple_baseline_model(X_train_p.shape[1], Y_train_p.shape[1])
+    baseline_model = build_simple_baseline_model(X_train_p.shape[1:], Y_train_p.shape[1])
     
     baseline_callbacks = [
         EarlyStopping(monitor='val_auc', patience=10, mode='max', restore_best_weights=True),
@@ -912,7 +1104,7 @@ def process_single_fold(fold_data):
     
     # Test breathing-optimized model
     print(f"Fold {fold_num} - Testing breathing-optimized neural network...")
-    breathing_model = build_breathing_optimized_model(X_train_p.shape[1], Y_train_p.shape[1])
+    breathing_model = build_breathing_optimized_model(X_train_p.shape[1:], Y_train_p.shape[1])
     
     breathing_callbacks = [
         EarlyStopping(monitor='val_auc', patience=12, mode='max', restore_best_weights=True),
@@ -3760,6 +3952,7 @@ def main():
     print("  - Cross-validation results in results/fold_* directories") 
     print("  - Deployment configuration: neural_decoder_config.json")
     print(f"  - Average cross-validation AUC: {avg_aucs.mean():.3f} ± {std_aucs.mean():.3f}")
+    print("  - Models: RNN/LSTM architectures optimized for temporal EEG data")
     
     # ========== POST-CV PERFORMANCE DIAGNOSTICS ==========
     print(f"\n===== POST-CV PERFORMANCE DIAGNOSTICS =====")
@@ -4015,6 +4208,177 @@ def main():
     # print('Saved label encoder → label_encoder.pkl')
 
 
+def main():
+    """
+    Streamlined RNN neural decoder pipeline:
+    1. Load and preprocess data
+    2. Run RNN cross-validation with 3 model architectures
+    3. Report clear results
+    """
+    csv_path = '/Users/a_fin/Desktop/Year 4/Project/Data/neural_data_complete_2.csv'
+    
+    print("===== RNN NEURAL DECODER =====")
+    print("Loading and preprocessing data...")
+    
+    # 1. Load data
+    df = pd.read_csv(csv_path)
+    groups = df['subject']
+    y = df['transition_label']
+    
+    # Define features
+    drop_cols = ['subject', 'week', 'run', 'epoch', 'number', 'transition_label']
+    X_raw = df.drop(columns=drop_cols, errors='ignore')
+    X_raw = select_features(X_raw, pattern_keep=['glob_chans'])
+    
+    # Rename features for clarity
+    def rename_features(X):
+        original_columns = X.columns.tolist()
+        X['psd global offset']    = X['psd_metrics_combined_avg__Offset_glob_chans']
+        X['wSMI 2 global']        = X['wsmi_2_global_2__wSMI_glob_chans']
+        X['psd global gamma']     = X['psd_metrics_combined_avg__Gamma_Power_glob_chans']
+        X['wSMI 4 global']        = X['wsmi_4_global_2__wSMI_glob_chans']
+        X['psd global beta']      = X['psd_metrics_combined_avg__Beta_Power_glob_chans']
+        X['psd global exponent']  = X['psd_metrics_combined_avg__Exponent_glob_chans']
+        X['wSMI 8 global']        = X['wsmi_8_global_2__wSMI_glob_chans']
+        X['psd global delta']     = X['psd_metrics_combined_avg__Delta_Power_glob_chans']
+        X['psd global alpha']     = X['psd_metrics_combined_avg__Alpha_Power_glob_chans']
+        X['wSMI 1 global']        = X['wsmi_1_global_2__wSMI_glob_chans']
+        X['LZC global']           = X['lz_metrics_combined_LZc__glob_chans']
+        X['LZsum global']         = X['lz_metrics_combined_LZsum__glob_chans']
+        X['psd global theta']     = X['psd_metrics_combined_avg__Theta_Power_glob_chans']
+        X['pe 2 global']          = X['pe_metrics_combined_2_wide__glob_chans']
+        X['pe 1 global']          = X['pe_metrics_combined_1_wide__glob_chans']
+        X['pe 4 global']          = X['pe_metrics_combined_4_wide__glob_chans']
+        X['pe 8 global']          = X['pe_metrics_combined_8_wide__glob_chans']
+        X = X.drop(columns=original_columns)
+        return X
+
+    X = rename_features(X_raw)
+    
+    print(f"Dataset: {len(df)} samples, {len(df['subject'].unique())} subjects")
+    print(f"Features: {X.shape[1]} EEG features")
+    print(f"Classes: {y.value_counts().to_dict()}")
+    print(f"Subjects: {sorted(df['subject'].unique())}")
+    
+    # 2. Run cross-validation
+    n_splits = len(df['subject'].unique())
+    gkf = GroupKFold(n_splits=n_splits)
+    
+    print(f"\n===== RUNNING RNN CROSS-VALIDATION =====")
+    print(f"Training RNN models with {n_splits} folds (leave-one-subject-out)")
+    
+    all_aucs = []
+    all_cms = []
+    fold_num = 0
+    
+    for train_idx, test_idx in gkf.split(X, y, groups=groups):
+        fold_num += 1
+        fold_data = (fold_num, train_idx, test_idx, X, y, df)
+        
+        print(f"\nFold {fold_num}/{n_splits}:")
+        test_subjects = df.iloc[test_idx]['subject'].unique()
+        print(f"  Test subject: {test_subjects[0]}")
+        
+        fold_num_result, cm, aucs = process_single_fold(fold_data)
+        
+        if cm is not None and aucs is not None:
+            all_cms.append(cm)
+            all_aucs.append(aucs)
+            
+            # Show fold results
+            fold_auc = np.mean(list(aucs.values()))
+            print(f"  Fold AUC: {fold_auc:.3f}")
+        else:
+            print(f"  ❌ Fold {fold_num} failed")
+    
+    # 3. Report final results
+    print(f"\n===== RNN RESULTS =====")
+    
+    if all_aucs:
+        # Calculate overall performance
+        avg_aucs = pd.DataFrame(all_aucs).mean()
+        std_aucs = pd.DataFrame(all_aucs).std()
+        overall_auc = avg_aucs.mean()
+        overall_std = std_aucs.mean()
+        
+        print(f"🎯 OVERALL PERFORMANCE:")
+        print(f"   Average AUC: {overall_auc:.3f} ± {overall_std:.3f}")
+        
+        print(f"\n📊 PER-CLASS AUC:")
+        for label in avg_aucs.index:
+            print(f"   Class {label}: {avg_aucs[label]:.3f} ± {std_aucs[label]:.3f}")
+        
+        # Confusion matrix
+        total_cm = np.sum(all_cms, axis=0)
+        total_cm_percent = total_cm.astype('float') / total_cm.sum(axis=1, keepdims=True) * 100
+        
+        print(f"\n🔢 CONFUSION MATRIX (%):")
+        for i in range(total_cm_percent.shape[0]):
+            row_str = "   "
+            for j in range(total_cm_percent.shape[1]):
+                row_str += f"{total_cm_percent[i, j]:6.1f}% "
+            print(row_str)
+        
+        # Performance assessment
+        print(f"\n📈 PERFORMANCE ASSESSMENT:")
+        if overall_auc > 0.70:
+            print("   ✅ EXCELLENT: Strong neural decoding performance")
+        elif overall_auc > 0.65:
+            print("   ✅ GOOD: Above target threshold (0.65)")
+        elif overall_auc > 0.60:
+            print("   ⚠️  MODERATE: Decent performance, room for improvement")
+        elif overall_auc > 0.55:
+            print("   🔍 WEAK: Slightly above chance, needs improvement")
+        else:
+            print("   ❌ POOR: Close to random chance")
+        
+        # Save results
+        results_dir = 'rnn_results'
+        os.makedirs(results_dir, exist_ok=True)
+        
+        import json
+        results_summary = {
+            'overall_auc_mean': float(overall_auc),
+            'overall_auc_std': float(overall_std),
+            'per_class_auc': {str(k): float(v) for k, v in avg_aucs.items()},
+            'per_class_std': {str(k): float(v) for k, v in std_aucs.items()},
+            'confusion_matrix_percent': total_cm_percent.tolist(),
+            'total_folds': len(all_aucs),
+            'model_type': 'RNN/LSTM',
+            'sequence_length': 10,
+            'feature_count': X.shape[1]
+        }
+        
+        with open(os.path.join(results_dir, 'rnn_results.json'), 'w') as f:
+            json.dump(results_summary, f, indent=2)
+        
+        # Save confusion matrix plot
+        plt.figure(figsize=(8, 6))
+        plt.imshow(total_cm_percent, cmap=plt.cm.Blues, vmin=0, vmax=100)
+        plt.title('RNN Cross-Validation Results\nConfusion Matrix (%)')
+        plt.colorbar(label='Percentage')
+        plt.xticks([0, 1, 2], ['Class 1', 'Class 2', 'Class 3'])
+        plt.yticks([0, 1, 2], ['Class 1', 'Class 2', 'Class 3'])
+        plt.xlabel('Predicted')
+        plt.ylabel('True')
+        for i in range(3):
+            for j in range(3):
+                plt.text(j, i, f"{total_cm_percent[i, j]:.1f}%", ha='center', va='center')
+        plt.tight_layout()
+        plt.savefig(os.path.join(results_dir, 'rnn_confusion_matrix.png'), dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        print(f"\n💾 RESULTS SAVED:")
+        print(f"   📁 Directory: {results_dir}/")
+        print(f"   📊 Summary: rnn_results.json")
+        print(f"   📈 Plot: rnn_confusion_matrix.png")
+        print(f"   📂 Individual folds: results/fold_*/")
+        
+    else:
+        print("❌ No valid results obtained")
+    
+    print(f"\n===== RNN ANALYSIS COMPLETE =====")
+
+
 if __name__ == '__main__':
     main()
-    # Uncomment the following line to run the script directly

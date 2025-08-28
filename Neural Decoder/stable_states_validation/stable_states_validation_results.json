@@ -1,0 +1,81 @@
+{
+  "validation_type": "stable_states_binary_classification",
+  "dataset_info": {
+    "total_samples": 8739,
+    "cluster_1_samples": 4309,
+    "cluster_2_samples": 4430,
+    "subjects_tested": 11,
+    "excluded_subjects": [
+      "s02",
+      "s19"
+    ],
+    "sequence_length": 25
+  },
+  "performance_metrics": {
+    "mean_auc": 0.6267028777073367,
+    "std_auc": 0.12762260934638012,
+    "auc_confidence_interval": [
+      0.530468744420467,
+      0.7229370109942064
+    ],
+    "mean_balanced_accuracy": 0.5978070420433805,
+    "std_balanced_accuracy": 0.08816863514508506,
+    "mean_f1_score": 0.5358440632409393,
+    "std_f1_score": 0.0980132712773303,
+    "fold_aucs": [
+      0.5065511880968243,
+      0.43626464670375187,
+      0.7563025210084033,
+      0.6489498894620487,
+      0.6892655367231638,
+      0.5,
+      0.8840579710144927,
+      0.645631067961165,
+      0.5412757973733584,
+      0.6587301587301587
+    ],
+    "fold_balanced_accs": [
+      0.49505884965578506,
+      0.5719020002367143,
+      0.615100585688821,
+      0.6139462048636699,
+      0.6297262059973925,
+      0.6329113924050633,
+      0.8149909420289855,
+      0.5473300970873787,
+      0.4817073170731707,
+      0.5753968253968254
+    ],
+    "fold_f1_scores": [
+      0.4930450812803754,
+      0.534092706850182,
+      0.4144483400424187,
+      0.6050156739811913,
+      0.625,
+      0.3875968992248062,
+      0.7274489076814659,
+      0.5463414634146342,
+      0.4540229885057471,
+      0.5714285714285714
+    ]
+  },
+  "statistical_analysis": {
+    "t_statistic": 2.9783800462060634,
+    "p_value": 0.015490256090115683,
+    "significant_above_chance": true,
+    "coefficient_of_variation": 0.2036413328964774
+  },
+  "assessment": {
+    "performance_level": "MODERATE",
+    "consistency_level": "LOW",
+    "validates_main_results": true
+  },
+  "fold_details": {
+    "successful_folds": 10,
+    "failed_folds": [
+      11
+    ],
+    "success_rate": 0.9090909090909091
+  },
+  "timestamp": "2025-08-28T13:42:30.554266"
+}
