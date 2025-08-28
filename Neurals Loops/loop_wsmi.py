@@ -3,14 +3,38 @@ import math
 import pandas as pd
 from concog_dreem_lib import process_wsmi
 
-subjects = ['s01']#, 's02']#, 's03', 's04', 's07', 's08', 's13', 's14', 's17', 's18', 's19', 's21']
-weeks    = [1, 2, 3, 4]
-runs     = [1, 2, 3, 4, 5, 6, 7]
+# List of subjects to process
+subjects = ['1425',
+'1465_WashingtonQuelea',
+'1733_BandjarmasinKomodoDragon',
+'184_WestYorkshireWalrus',
+'1867_BucharestTrout',
+'1867_GoianiaCrane',
+'1871',
+'1991_MendozaCow',
+'2222_JiutaiChicken',
+'2743_HuaianKoi',
+'3604_LichuanHookworm',
+'3604_ShangquiHare',
+'3614_BrisbaneHornet',
+'3614_VientianeWhippet',
+'3938_YingchengSeaLion',
+'4765_NouakchottMoose',
+'5644_AkesuCoral',
+'5892_LvivRooster',
+'5892_NonthaburiHalibut',
+'7135_TampicoWallaby',
+'8681_NanchangAlbatross',
+'8725_ShishouMosquito',
+'8725_YangchunCobra']
 
-base_path     = "/Users/a_fin/Library/CloudStorage/OneDrive-UniversityofCambridge/Evan Lewis Healey's files - Dreem_Pilot"
-epoch_length  = '4secs'
-kernel        = 3
-tau           = 1
+# Base directory for the data files
+base_path = "/Users/a_fin/Desktop/Year 4/Project/Meditation/DreemEEG"
+epoch_dir_candidates = ["6-rej_epoch", "5-rej_epoch"]
+
+epoch_length = '4secs'
+kernel = 3
+tau = 1
 method_params = {"bypass_csd": True}
 
 custom_channel_groups = {
@@ -20,41 +44,124 @@ custom_channel_groups = {
     'glob_chans': list(range(8))
 }
 
+# CSV containing sessions per subject
+meta_csv = "/Users/a_fin/Desktop/Year 4/Project/Data/Meditation_TET_data.csv"
+SUBJECT_COL = "Subject"   # <-- change if needed (e.g., "SubjectID")
+SESSION_COL = "Session"   # <-- change if needed (e.g., "Session")
+
+# ------------- load sessions map -------------
+if not os.path.exists(meta_csv):
+    raise FileNotFoundError(f"CSV not found: {meta_csv}")
+
+df_meta = pd.read_csv(meta_csv)
+
+if SUBJECT_COL not in df_meta.columns or SESSION_COL not in df_meta.columns:
+    raise ValueError(f"CSV must contain columns '{SUBJECT_COL}' and '{SESSION_COL}'")
+
+# Normalize sessions to the numeric prefix only (e.g., "688320_TET.mat" -> "688320")
+df_meta[SESSION_COL] = (
+    df_meta[SESSION_COL]
+    .astype(str)
+    .str.extract(r'^(\d+)')[0]  # take leading digits
+)
+
+# Build mapping: subject -> sorted unique list of sessions
+sessions_by_subject = (
+    df_meta
+    .dropna(subset=[SUBJECT_COL, SESSION_COL])
+    .groupby(SUBJECT_COL)[SESSION_COL]
+    .apply(lambda s: sorted(pd.unique(s)))
+    .to_dict()
+)
+
 # collect every wsmi DataFrame
 all_wsmi = []
 
 for subject in subjects:
-    for week in weeks:
-        for run in runs:
-            week_folder   = f"week_{week}"
-            base_filename = f"{subject}_wk{week}_{run}"
-            orig_path     = os.path.join(base_path, subject, week_folder, "5-labelled&cut",
-                                         base_filename + "_hp_4sec_labelled_cut.set")
-            proc_path     = os.path.join(base_path, subject, week_folder, "6-reref_rej_epoch", "4sec",
-                                         base_filename + "_hp_4sec_labelled_cut_reref_rej_epoch.set")
+    subj_sessions = sessions_by_subject.get(subject, [])
+    if not subj_sessions:
+        print(f"No sessions listed in CSV for subject {subject}; skipping.")
+        continue
+    for session in subj_sessions:
+        # Ensure session is a string (filenames may expect numbers or strings)
+        session_str = str(session)
 
-            if not os.path.exists(orig_path):
+        # Candidate filename patterns
+        filename_patterns = [
+            "{session}_cut_4sec_rej_epoch.set",
+            "{session}_hp_4sec_labelled_rej_epoch.set",
+        ]
+
+        original_set_path = None
+        processed_set_path = None
+        chosen_epoch_dir = None
+        chosen_filename = None
+
+        # Try both 6-rej_epoch and 5-rej_epoch
+        for d in epoch_dir_candidates:
+            dir_path = os.path.join(base_path, subject, d)
+            if not os.path.isdir(dir_path):
                 continue
 
-            wsmi_results = process_wsmi(
-                original_set_path=orig_path,
-                processed_set_path=proc_path,
-                epoch_length=epoch_length,
-                custom_channel_groups=custom_channel_groups,
-                kernel=kernel,
-                tau=tau,
-                method_params=method_params
-            )
-            if wsmi_results is None:
-                continue
+            # Try known patterns first
+            for pat in filename_patterns:
+                candidate = os.path.join(dir_path, pat.format(session=session_str))
+                if os.path.exists(candidate):
+                    chosen_epoch_dir = d
+                    chosen_filename = os.path.basename(candidate)
+                    original_set_path = candidate
+                    processed_set_path = candidate
+                    break
 
-            df = wsmi_results['wsmi']
-            # add meta so we can group on it
-            df['subject'] = subject
-            df['week']    = week
-            df['run']     = run
-            # df already has an 'epoch' column
-            all_wsmi.append(df)
+            if original_set_path:
+                break
+
+            # Fallback: scan for any file starting with the session id and ending with '_rej_epoch.set'
+            try:
+                matches = [
+                    f for f in os.listdir(dir_path)
+                    if f.startswith(session_str) and f.endswith("_rej_epoch.set")
+                ]
+            except FileNotFoundError:
+                matches = []
+
+            if matches:
+                # Prefer 'cut' over 'hp' if multiple
+                matches.sort(key=lambda x: (0 if "cut" in x else 1, x))
+                chosen = matches[0]
+                chosen_epoch_dir = d
+                chosen_filename = chosen
+                original_set_path = os.path.join(dir_path, chosen)
+                processed_set_path = original_set_path
+                break
+
+        if not original_set_path:
+            print(f"Original file not found for {subject} session {session_str}")
+            continue
+        else:
+            print(f"Using '{chosen_epoch_dir}/{chosen_filename}' for {subject} session {session_str}")
+
+        wsmi_results = process_wsmi(
+            original_set_path=original_set_path,
+            processed_set_path=processed_set_path,
+            epoch_length=epoch_length,
+            custom_channel_groups=custom_channel_groups,
+            kernel=kernel,
+            tau=tau,
+            method_params=method_params
+        )
+        if wsmi_results is None:
+            print(f"Processing wSMI failed for {subject} session {session_str}")
+            continue
+
+        df = wsmi_results['wsmi']
+        # add meta so we can group on it
+        df['subject'] = subject
+        df['session'] = session_str  # keep explicit
+        df['run'] = session_str       # optional: keep 'run' for compatibility
+        # df already has an 'epoch' column
+        all_wsmi.append(df)
+        print(f"Processed {subject} session {session_str}")
 
 # concatenate everything
 combined = pd.concat(all_wsmi, ignore_index=True)
@@ -64,10 +171,10 @@ metrics = [
     'SMI'
 ]
 
-# Group by epoch, subject, week, and run, then take the mean across channels
+# Group by epoch, subject, session, and run, then take the mean across channels
 grouped = (
     combined
-    .groupby(['subject', 'week', 'run', 'epoch'], as_index=False)[metrics]
+    .groupby(['subject', 'session', 'run', 'epoch'], as_index=False)[metrics]
     .mean()
 )
 
@@ -77,6 +184,6 @@ grouped = grouped.rename(
 )
 
 # write out
-out_path = f"/Users/a_fin/Desktop/Year 4/Project/Data/wsmi_{tau}_global.xlsx"
+out_path = f"/Users/a_fin/Desktop/Year 4/Project/Data/med_wsmi_{tau}_global.xlsx"
 grouped.to_excel(out_path, index=False)
 print(f"Saved per‐epoch global averages to {out_path}")
