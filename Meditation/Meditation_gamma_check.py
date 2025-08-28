@@ -14,7 +14,7 @@ import yaml
 from joblib import Parallel, delayed
 
 # --- Config & Paths ---
-meditation_csv = '/Users/a_fin/Desktop/Year 4/Project/Data/Meditation_TET_data_labelled_noThought.csv'
+meditation_csv = '/Users/a_fin/Desktop/Year 4/Project/ASC_project/converted_csv/combined_all_subjects_labelled.csv'
 config_path     = '/Users/a_fin/Desktop/Year 4/Project/ASC_project/Meditation.yaml'
 saveloc         = '/Users/a_fin/Desktop/Year 4/Project/Data/'
 os.makedirs(saveloc, exist_ok=True)
@@ -36,7 +36,7 @@ pc_finder = principal_component_finder(df_csv_file_original, feelings, n_pca_dim
 principal_components, _, _ = pc_finder.PCA_TOT()
 
 # --- True-Label Encoding (only OM & LK get labels; others NaN) ---
-true_map = {'Open Monitoring': 3, 'Loving Kindness': 4}
+true_map = {'Open Monitoring': 4, 'Loving Kindness': 2}
 df_csv_file_original['true_label'] = df_csv_file_original['Med_type'].map(true_map)
 
 transition_contributions = 5.0

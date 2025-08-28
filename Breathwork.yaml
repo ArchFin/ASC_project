@@ -3,6 +3,13 @@ filelocation_TET: '/Users/a_fin/Desktop/Year 4/Project/Data/NDT_all_12thDec_uncl
 
 savelocation_TET: '/Users/a_fin/Desktop/Year 4/Project/Data/'
 
+hyperparameters:
+  filelocation_smoothness: '/Users/a_fin/Desktop/Year 4/Project/Summer_Data/hyperparameter_optimization_comparison_data_2states.csv'  # File location of the smoothness parameters for Breathwork, needs to be in CSV format.
+  gamma_col: 'gamma_threshold'  # Column name for gamma threshold in the CSV.
+  nu_col: 'min_nu'  # Column name for minimum nu in the CSV.
+  tc_col: 'transition_contribution'  # Column name for transition contribution in the CSV.
+  smoothness_col: 'measured_smoothness'  # Column name for measured smoothness in the CSV.
+
 feelings:
   - MetaAwareness
   - Presence
@@ -39,6 +46,7 @@ no_dimensions_PCA: 2  # Number of dimensions to run the PCA on.
 no_clust: 2  # Number of vectoral clusters, note total clusters will be one greater as the stable cluster is split into 2.
 no_of_jumps: 1  # Number of timestep jumps in the TET to form the vectors. 7 for the Kmeans 1 for HMM (relic)
 no_states: 2 # Optimal number of states
+time_jump: 60  # Original data sampling interval (seconds)
 headers:
   Subject: 0
   Week: 1

@@ -26,7 +26,7 @@ from sklearn.mixture import GaussianMixture
 from scipy.stats import multivariate_normal
 from scipy.stats import chi2_contingency
 from sklearn.metrics.cluster import normalized_mutual_info_score
-
+from scipy.cluster.hierarchy import linkage, leaves_list
 
 # =============================================================================|
 # Configuration via YAML                                                       |
@@ -606,6 +606,20 @@ class CustomHMMClustering:
         plt.savefig(self.savelocation_TET + 'state_centres_transition_HMM.png')
         plt.close()
 
+    @staticmethod
+    def get_feature_order_by_similarity(cluster_centres, feelings):
+        """
+        Returns a reordered list of feature indices so that similar features (across clusters)
+        are adjacent on the radar plot.
+        """
+        # cluster_centres: shape (n_clusters, n_features)
+        # Compute distance between features (columns)
+        feature_vectors = cluster_centres.T  # shape (n_features, n_clusters)
+        # Use hierarchical clustering on features
+        Z = linkage(feature_vectors, method='average', metric='euclidean')
+        order = leaves_list(Z)
+        return order
+
     def _plot_cluster_features(self):
         for cluster_idx in range(self.cluster_centres_fin.shape[0]):
             plt.figure(figsize=(10, 6))
@@ -618,6 +632,112 @@ class CustomHMMClustering:
             plt.tight_layout()
             plt.savefig(self.savelocation_TET + f'cluster_{cluster_idx+1}_feature_means.png')
             plt.close()
+
+            # New: create a radar plot for the cluster centroid
+            try:
+                self._radar_plot_for_cluster(cluster_idx)
+            except Exception as e:
+                print(f"Warning: radar plot for cluster {cluster_idx+1} failed: {e}")
+        
+        # After plotting each cluster's bar chart and per-cluster radar, create an overlaid radar
+        # for all clusters (all features) once per call to _plot_cluster_features.
+        try:
+            self._radar_plot_all_clusters()
+        except Exception as e:
+            print(f"Warning: overlaid radar plot failed: {e}")
+
+    def _radar_plot_for_cluster(self, cluster_idx, max_items=None):
+        """Create and save a radar (spider) plot for a cluster centroid.
+        By default (max_items=None) all features are plotted. If max_items is an
+        integer, the top-k features by absolute magnitude will be plotted instead.
+        Values are normalized per-feature across clusters to [0,1] for comparability.
+        """
+        labels = np.array(self.feelings)
+        values = np.array(self.cluster_centres_fin[cluster_idx])
+
+        # Decide which indices to plot
+        if isinstance(max_items, int) and max_items > 0 and len(labels) > max_items:
+            top_idx = np.argsort(np.abs(values))[-max_items:][::-1]
+            plot_labels = labels[top_idx]
+            plot_values = values[top_idx]
+            vmin = np.min(self.cluster_centres_fin[:, top_idx], axis=0)
+            vmax = np.max(self.cluster_centres_fin[:, top_idx], axis=0)
+            denom = (vmax - vmin)
+            denom[denom == 0] = 1.0
+            norm_values = (plot_values - vmin) / denom
+        else:
+            # Plot all features
+            order = self.get_feature_order_by_similarity(self.cluster_centres_fin, self.feelings)
+            plot_labels = labels[order]
+            plot_values = values[order]
+            vmin = np.min(self.cluster_centres_fin[:, order], axis=0)
+            vmax = np.max(self.cluster_centres_fin[:, order], axis=0)
+            denom = (vmax - vmin)
+            denom[denom == 0] = 1.0
+            norm_values = (plot_values - vmin) / denom
+
+        # Radar coordinates
+        N = len(plot_labels)
+        angles = np.linspace(0, 2 * np.pi, N, endpoint=False).tolist()
+        values_loop = np.concatenate([norm_values, [norm_values[0]]])
+        angles_loop = angles + [angles[0]]
+
+        # Plot
+        fig = plt.figure(figsize=(8, 8))
+        ax = fig.add_subplot(111, polar=True)
+        ax.plot(angles_loop, values_loop, color='teal', linewidth=2)
+        ax.fill(angles_loop, values_loop, color='teal', alpha=0.25)
+        ax.set_thetagrids(np.degrees(angles), plot_labels)
+        ax.set_ylim(0, 1)
+        if N == len(labels):
+            title_suffix = ' (all features)'
+        else:
+            title_suffix = f' (top {N} features)'
+        ax.set_title(f'Cluster {cluster_idx+1}{title_suffix}', y=1.02)
+        plt.tight_layout()
+
+        savepath = os.path.join(self.savelocation_TET, f'cluster_{cluster_idx+1}_radar.png')
+        plt.savefig(savepath, dpi=300, bbox_inches='tight')
+        plt.close()
+
+    def _radar_plot_all_clusters(self):
+        """Overlay radar plots for all cluster centroids, showing all features (no top-k).
+        Values are normalized per-feature across clusters to [0,1] for comparability.
+        """
+        labels = np.array(self.feelings)
+        centres = np.array(self.cluster_centres_fin)
+        n_clusters, n_features = centres.shape
+
+        # --- Use similarity-based feature order ---
+        order = self.get_feature_order_by_similarity(centres, labels)
+        plot_labels = labels[order]
+        norm_centres = (centres[:, order] - centres[:, order].min(axis=0)) / (centres[:, order].max(axis=0) - centres[:, order].min(axis=0))
+        norm_centres = np.nan_to_num(norm_centres, nan=0.0, posinf=0.0, neginf=0.0)
+
+        # Radar coordinates
+        N = len(plot_labels)
+        angles = np.linspace(0, 2 * np.pi, N, endpoint=False).tolist()
+        angles += angles[:1]
+
+        fig = plt.figure(figsize=(10, 10))
+        ax = fig.add_subplot(111, polar=True)
+
+        cmap = plt.get_cmap('tab10')
+        for i in range(n_clusters):
+            vals = norm_centres[i].tolist()
+            vals += vals[:1]
+            color = cmap(i % 10)
+            ax.plot(angles, vals, color=color, linewidth=2, label=f'Cluster {i+1}')
+            ax.fill(angles, vals, color=color, alpha=0.25)
+
+        ax.set_thetagrids(np.degrees(angles[:-1]), plot_labels)
+        ax.set_ylim(0, 1)
+        ax.set_title('Overlayed Cluster Centroids - Radar (all features)', y=1.08)
+        ax.legend(loc='upper left', bbox_to_anchor=(1.15, 1.05))
+        plt.tight_layout()
+        out_path = os.path.join(self.savelocation_TET, 'clusters_radar_overlay_all_features.png')
+        plt.savefig(out_path, dpi=300, bbox_inches='tight')
+        plt.close()
 
     def _create_cluster_summary(self):
         summary = []
@@ -871,7 +991,7 @@ class CustomHMMClustering:
             optimal_params_df = pd.read_csv(optimal_params_csv_path)
             
             # Sort by smoothness for interpolation
-            optimal_params_df = optimal_params_df.sort_values('smoothness')
+            optimal_params_df = optimal_params_df.sort_values('measured_smoothness')
             
             # Handle different possible column naming conventions
             gamma_col = None
@@ -887,8 +1007,8 @@ class CustomHMMClustering:
                     tc_col = col
             
             # Check if smoothness is within validation range
-            min_smoothness = optimal_params_df['smoothness'].min()
-            max_smoothness = optimal_params_df['smoothness'].max()
+            min_smoothness = optimal_params_df['measured_smoothness'].min()
+            max_smoothness = optimal_params_df['measured_smoothness'].max()
             
             print(f"Data smoothness: {smoothness_metric:.6f}")
             print(f"Validation range: {min_smoothness:.6f} - {max_smoothness:.6f}")
@@ -905,14 +1025,14 @@ class CustomHMMClustering:
                 method = "extrapolated_high"
             else:
                 # Interpolate between closest values
-                closest_idx = (optimal_params_df['smoothness'] - smoothness_metric).abs().idxmin()
+                closest_idx = (optimal_params_df['measured_smoothness'] - smoothness_metric).abs().idxmin()
                 optimal_row = optimal_params_df.loc[closest_idx]
                 method = "interpolated"
                 
                 # Try linear interpolation if not exact match
-                if abs(optimal_row['smoothness'] - smoothness_metric) > 0.001:
+                if abs(optimal_row['measured_smoothness'] - smoothness_metric) > 0.001:
                     # Find the two closest points for interpolation
-                    diff = optimal_params_df['smoothness'] - smoothness_metric
+                    diff = optimal_params_df['measured_smoothness'] - smoothness_metric
                     
                     # Find closest lower and upper bounds
                     lower_mask = diff <= 0
@@ -923,8 +1043,8 @@ class CustomHMMClustering:
                         upper_row = optimal_params_df[upper_mask].iloc[0]   # Closest from above
                         
                         # Linear interpolation weight
-                        if upper_row['smoothness'] != lower_row['smoothness']:
-                            weight = (smoothness_metric - lower_row['smoothness']) / (upper_row['smoothness'] - lower_row['smoothness'])
+                        if upper_row['measured_smoothness'] != lower_row['measured_smoothness']:
+                            weight = (smoothness_metric - lower_row['measured_smoothness']) / (upper_row['measured_smoothness'] - lower_row['measured_smoothness'])
                             
                             # Interpolate parameters
                             interpolated_params = {}
@@ -937,19 +1057,19 @@ class CustomHMMClustering:
                             
                             # Create interpolated row
                             optimal_row = pd.Series({
-                                'smoothness': smoothness_metric,
+                                'measured_smoothness': smoothness_metric,
                                 **interpolated_params
                             })
                             method = "linear_interpolated"
-                            print(f"Linear interpolation between smoothness {lower_row['smoothness']:.6f} and {upper_row['smoothness']:.6f}")
+                            print(f"Linear interpolation between smoothness {lower_row['measured_smoothness']:.6f} and {upper_row['measured_smoothness']:.6f}")
             
             # Extract parameters with defaults
             optimal_params = {
-                'gamma_threshold': optimal_row.get(gamma_col, 0.03),
-                'min_nu': int(optimal_row.get(nu_col, 9)),
-                'transition_contribution': int(optimal_row.get(tc_col, 6)),
-                'matched_smoothness': optimal_row.get('smoothness', smoothness_metric),
-                'smoothness_difference': abs(optimal_row.get('smoothness', smoothness_metric) - smoothness_metric),
+                'gamma_threshold': optimal_row.get(gamma_col, 0.01),
+                'min_nu': int(optimal_row.get(nu_col, 12)),
+                'transition_contribution': int(optimal_row.get(tc_col, 12)),
+                'matched_smoothness': optimal_row.get('measured_smoothness', smoothness_metric),
+                'smoothness_difference': abs(optimal_row.get('measured_smoothness', smoothness_metric) - smoothness_metric),
                 'selection_method': method
             }
             
@@ -1035,7 +1155,7 @@ class CustomHMMClustering:
 # =============================================================================|
 class Visualiser:
     def __init__(self, filelocation_TET, savelocation_TET, array, df_csv_file_original,
-                 dictionary_clust_labels, principal_components, feelings, no_of_jumps, colours, transitions):
+                 dictionary_clust_labels, principal_components, feelings, no_of_jumps, colours, transitions, time_jump):
         self.filelocation_TET = filelocation_TET
         self.savelocation_TET = savelocation_TET
         self.array = array
@@ -1050,6 +1170,7 @@ class Visualiser:
                   for i, feeling in enumerate(self.feelings)}
         self.has_week = 'Week' in df_csv_file_original.columns
         self.has_type = 'Med_type' in df_csv_file_original.columns
+        self.time_jump = time_jump
 
     def preprocess_data(self):
         ##TODO: DONT HARD CODE THIS, MAKE IT ADD TO THE YAML FILE AS AN OPTION
@@ -1109,7 +1230,8 @@ class Visualiser:
 
     def plot_trajectories(self):
         """Main plotting function with transition visualization"""
-        time_jump = 28  # Original data sampling interval (seconds)
+        # Original data sampling interval (seconds)
+        time_jump = self.time_jump
 
         def format_heading(heading):
             if isinstance(heading, tuple):
@@ -1165,7 +1287,7 @@ class Visualiser:
                              for cluster, color in self.color_map.items()]
             handles, labels = ax.get_legend_handles_labels()
             handles.extend(cluster_patches)
-            labels.extend([f'Cluster {label}' 
+            labels.extend([f'{label}' 
                          for label in self.dictionary_clust_labels.values()])
             ax.legend(handles=handles, labels=labels, title='Legend',
                      bbox_to_anchor=(1.05, 1), loc='upper left')
@@ -1181,7 +1303,9 @@ class Visualiser:
     def save_transitions_to_file(self):
         """Save transition metadata to CSV file with per-transition condition frequencies"""
         transitions_list = []
-        time_step = 28 * self.no_of_jumps  # Seconds between data points
+        time_jump = self.time_jump
+        
+        time_step = time_jump * self.no_of_jumps  # Seconds between data points
         
         has_condition_col = 'Condition' in self.df_csv_file_original.columns
         
@@ -1229,8 +1353,8 @@ class Visualiser:
 
                 if has_condition_col:
                     # Convert to original data indices
-                    original_start_idx = max(0, int(start_time // 28))
-                    original_end_idx = min(len(original_group)-1, int(end_time // 28))
+                    original_start_idx = max(0, int(start_time // time_jump))
+                    original_end_idx = min(len(original_group)-1, int(end_time // time_jump))
 
                     # Extract conditions in each region
                     before_start = max(0, original_start_idx - window_size)

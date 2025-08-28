@@ -3,11 +3,10 @@ import matplotlib.pyplot as plt
 from sklearn.cluster import KMeans
 import pandas as pd
 
-data = pd.read_csv('/Users/a_fin/Desktop/Year 4/Project/Data/Meditation_TET_data.csv')
+data = pd.read_csv('/Users/a_fin/Desktop/Year 4/Project/ASC_project/converted_csv/combined_all_subjects_labelled.csv')
 
 feeling_columns = [
-    'Boredom', 'Clarity', 'Conflict', 'Dereification', 'Wakefulness',
-    'Emotion', 'Effort', 'Stability', 'MetaAwareness', 'ObjectOrientation', 'Source'
+    'Aperture','Boredom','Clarity','Conflict','Dereification','Wakefulness','Emotion','Effort','Stability','MetaAwareness','ObjectOrientation','Source'
 ]
 X = data[feeling_columns].values
 
