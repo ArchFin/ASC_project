@@ -1,0 +1,14 @@
+test_name,p_value,significant,interpretation
+bridge_frequency,N/A,True,Bridge transitions enriched
+event_presence_intro_freq,Multiple,True,See detailed results
+temporal_alignment_threeway_intro_freq,1.1555325742735593e-08,True,Significant difference across periods
+event_presence_breath_freq,Multiple,True,See detailed results
+temporal_alignment_threeway_breath_freq,0.0007288441513905699,True,Significant difference across periods
+event_presence_hold_freq,Multiple,True,See detailed results
+temporal_alignment_threeway_hold_freq,7.626167206405134e-07,True,Significant difference across periods
+event_presence_rest_freq,Multiple,True,See detailed results
+temporal_alignment_threeway_rest_freq,8.1046148571139e-06,True,Significant difference across periods
+event_presence_end_freq,Multiple,True,See detailed results
+temporal_alignment_threeway_end_freq,0.0026869331231183986,True,Significant difference across periods
+event_presence_fast_freq,Multiple,True,See detailed results
+temporal_alignment_threeway_fast_freq,0.30705668966063837,False,No difference across periods

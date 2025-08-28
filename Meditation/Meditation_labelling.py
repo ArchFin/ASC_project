@@ -4,7 +4,7 @@ import pandas as pd
 # Paths
 csv_path = '/Users/a_fin/Desktop/Year 4/Project/Data/Meditation_TET_data.csv'
 meditation_dir = '/Users/a_fin/Desktop/Year 4/Project/Meditation'
-output_path = '/Users/a_fin/Desktop/Year 4/Project/Data/Meditation_TET_data_labelled_Thoughtless.csv'
+output_path = '/Users/a_fin/Desktop/Year 4/Project/Data/Meditation_TET_data_labelled_noThought.csv'
 
 df = pd.read_csv(csv_path)
 labels = []
@@ -57,11 +57,8 @@ label_map = {
 }
 df['Med_type'] = df['Med_type'].replace(label_map)
 
-# Find subjects who have at least one 'Thought' meditation
-thought_subjects = set(df.loc[df['Med_type'] == 'Thought', 'Subject'])
-# Keep all rows for those subjects
-filtered_df = df[df['Subject'].isin(thought_subjects)]
-
+# Exclude all rows where Med_type is 'Thought'
+filtered_df = df[df['Med_type'] != 'Thought']
 
 filtered_df.to_csv(output_path, index=False)
 print(f"Saved labeled data to {output_path}")
